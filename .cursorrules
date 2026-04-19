@@ -1,0 +1,85 @@
+# Heli-VertiSafe — Project Rules for Cursor AI
+
+## PROJECT OVERVIEW
+This is a helipad/vertiport feasibility analysis tool. It scores potential helipad zones based on wind, obstacles, terrain, access, geometry, and environment. It generates compliance reports per ICAO and Saudi GACAR standards.
+
+## CRITICAL: DO NOT MODIFY THESE
+- **Scoring formulas**: sWind, sObs, sTer, sAcc, sGeo, sEnv — these are calibrated to aviation standards
+- **ICAO values**: 1:8 approach gradient, 1:2 transitional, 45m IH, 0.83D TLOF, 95% wind coverage
+- **GACAR values**: 2% max slope PC1, 3% PC2/3, 4% SA slope, 30m building clearance, 2D obstacle distance
+- **Compliance check clause numbers**: GACAR Part 138.xxx, ICAO Annex 14 Vol II references
+- **calcGeom formulas**: FATO = D × fatoMin, SA = max(D×0.25, 3), etc.
+- **calcOrientation logic**: crosswind/headwind decomposition, 5° heading increment scan
+- **autoCalcCoords**: bidirectional X,Y ↔ Distance,Bearing conversion. Both directions must always work.
+- **Aircraft data**: D-values, MTOW, crosswind limits — these are from manufacturer specs
+
+## AVIATION TERMINOLOGY
+- FATO = Final Approach and Take-Off area
+- SA = Safety Area (surrounds FATO)
+- TLOF = Touchdown and Lift-Off area
+- OLS = Obstacle Limitation Surface
+- D-value = Reference dimension of largest helicopter (overall length including rotors)
+- PC1/PC2/PC3 = Performance Class (determines slope limits and approach requirements)
+- GACAR = General Authority of Civil Aviation Regulation (Saudi Arabia)
+- ICAO = International Civil Aviation Organization
+- AGL = Above Ground Level
+- AMSL = Above Mean Sea Level
+- NOTAM = Notice to Airmen
+
+## DATA MODEL
+- Project (proj): contains helicopter selection, PC, mode, weights, workflow, audit log
+- Site: lat/lng/elev, study area dimensions, grid size, exclusions, boundary, destinations
+- Zone: corners (polygon), wind data, obstacles array, terrain, access, sensitivity, vertiport, source tags, scores
+- Obstacle: name, type, height AGL, width, length, x, y, distance, bearing, corners (polygon), confidence
+- Sensitivity Zone: name, type, level (low/medium/high), distance, bearing, x, y
+- Access Node: name, type, distance, bearing, x, y, importance (1-5)
+
+## REDUCER ACTIONS (30+)
+STEP, TAB, UP, US, SZ, SEL, ZF, AO, UO, DO, TOG, ASENS, USENS, DSENS, ANODE, UNODE, DNODE, AEXCL, UEXCL, DEXCL, ADEST, UDEST, DDEST, RUN, SAVE_SCENARIO, DEL_SCENARIO, DUP_SCENARIO, LOAD_SCENARIO, WHATIF, WORKFLOW, IMPORT, DEMO, RESET, APPLY_ALL, UNDO, REDO
+
+## CODING STANDARDS
+- Use functional React components with hooks (no class components except ErrorBoundary)
+- Keep the dark theme: bg=#050a12, surface=#0b1120, text=#e1e7ef, cyan=#06b6d4, green=#10b981
+- Font: Outfit (Google Fonts)
+- All measurements in meters unless stated otherwise
+- Wind speed in knots
+- Angles in degrees (convert to radians with DEG = Math.PI/180)
+- Always maintain bidirectional auto-calc: when X or Y changes → recalc Distance + Bearing, and vice versa
+
+## WHEN ADDING NEW FEATURES
+1. Never break existing scoring/compliance logic
+2. New UI components should follow the existing glassmorphism style (hvs-card, hvs-glass classes)
+3. New data fields should be added to the appropriate mk* factory function with defaults
+4. New reducer actions should follow the pattern: return { ...state, [updated field], scored: false }
+5. Always handle null/undefined gracefully — the app should never crash on missing data
+
+## TESTING CHECKLIST
+After any change, verify:
+- [ ] Welcome screen loads
+- [ ] Demo data loads correctly
+- [ ] All 6 steps render without errors
+- [ ] Run Analysis produces scores
+- [ ] Compliance checks show PASS/FAIL
+- [ ] 3D view renders (Three.js)
+- [ ] File import works (at least CSV)
+- [ ] Export/Import JSON works
+- [ ] Undo/Redo works (Ctrl+Z/Y)
+- [ ] No console errors
+
+## FILE STRUCTURE (after split)
+```
+src/
+├── App.jsx              # Main shell
+├── components/
+│   ├── WelcomeScreen.jsx
+│   ├── steps/           # 6 step views
+│   ├── charts/          # SVG + Three.js
+│   ├── ui/              # Tag, ScoreBar, ZGrid, etc.
+│   └── report/          # Report + PDF
+├── engine/              # Scoring + compliance (PURE FUNCTIONS — do not add UI here)
+├── parsers/             # File format parsers
+├── data/                # Constants + models + demo
+├── state/               # Reducer + undo + autosave
+├── utils/               # Theme + coords + geometry
+└── types/               # TypeScript interfaces (after TS migration)
+```

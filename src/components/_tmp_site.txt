@@ -1,0 +1,142 @@
+
+  const renderSite = () => (
+    <div>
+      <h2 style={{ fontSize: 22, fontWeight: 800, color: K.tx, margin: "0 0 16px", paddingBottom: 10, borderBottom: "2px solid " + K.cy + "30", maxWidth: 560 }}>Site Definition</h2>
+      <SiteDefinitionMap site={site} zones={zones} dp={dp} />
+      <div style={{ maxWidth: 560 }}>
+      <div style={{ marginBottom: 12 }}>{lbl("Site Name *")}{inp("text", site.nm, v => dp({ type: "US", payload: { nm: v } }))}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
+        <div>{lbl("Lat")}{inp("number", site.lat, v => dp({ type: "US", payload: { lat: v } }), { suffix: "°", step: 0.0001 })}</div>
+        <div>{lbl("Lng")}{inp("number", site.lng, v => dp({ type: "US", payload: { lng: v } }), { suffix: "°", step: 0.0001 })}</div>
+        <div>{lbl("Elev")}{inp("number", site.elev, v => dp({ type: "US", payload: { elev: v } }), { suffix: "m" })}</div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
+        <div>{lbl("Width")}{inp("number", site.sw, v => dp({ type: "US", payload: { sw: v } }), { suffix: "m", min: 30 })}</div>
+        <div>{lbl("Height")}{inp("number", site.sh, v => dp({ type: "US", payload: { sh: v } }), { suffix: "m", min: 30 })}</div>
+        <div>{lbl("Mag Decl")}{inp("number", site.md, v => dp({ type: "US", payload: { md: v } }), { suffix: "°" })}</div>
+        <div>{lbl("Ref Temp")}{inp("number", site.rt, v => dp({ type: "US", payload: { rt: v } }), { suffix: "°C" })}</div>
+      </div>
+      {/* EXCLUSION ZONES */}
+      <div className="hvs-card" style={{ padding: 12, marginTop: 8 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: K.rd }}>🚫 Exclusion Zones ({(site.exclusions || []).length})</span>
+          {btn("+ Add", () => dp({ type: "AEXCL" }), "ghost")}
+        </div>
+        {(site.exclusions || []).map((ex, i) => (
+          <div key={ex.id} style={{ background: K.rs, borderRadius: 4, padding: 8, marginBottom: 4 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: K.rd }}>#{i + 1}</span>
+              <button onClick={() => dp({ type: "DEXCL", payload: ex.id })} style={{ background: K.rd + "18", color: K.rd, border: "1px solid " + K.rd + "33", borderRadius: 3, fontSize: 8, padding: "1px 4px", cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+              <div>{lbl("Name")}{inp("text", ex.nm, v => dp({ type: "UEXCL", payload: { eid: ex.id, fld: "nm", val: v } }))}</div>
+              <div>{lbl("Reason")}{inp("text", ex.reason, v => dp({ type: "UEXCL", payload: { eid: ex.id, fld: "reason", val: v } }), { ph: "e.g. Parking structure" })}</div>
+              <div>{lbl("Offset X")}{inp("number", ex.x, v => dp({ type: "UEXCL", payload: { eid: ex.id, fld: "x", val: v } }), { suffix: "m" })}</div>
+              <div>{lbl("Offset Y")}{inp("number", ex.y, v => dp({ type: "UEXCL", payload: { eid: ex.id, fld: "y", val: v } }), { suffix: "m" })}</div>
+              <div>{lbl("Width")}{inp("number", ex.w, v => dp({ type: "UEXCL", payload: { eid: ex.id, fld: "w", val: v } }), { suffix: "m" })}</div>
+              <div>{lbl("Height")}{inp("number", ex.h, v => dp({ type: "UEXCL", payload: { eid: ex.id, fld: "h", val: v } }), { suffix: "m" })}</div>
+            </div>
+          </div>
+        ))}
+        {!(site.exclusions || []).length && <div style={{ fontSize: 9, color: K.mu, textAlign: "center", padding: 8 }}>No exclusion zones. Add restricted/no-build areas here.</div>}
+      </div>
+      {/* FILE IMPORT (multi-format) */}
+      <div style={{ background: K.sf, borderRadius: 8, padding: 12, border: "1px solid " + K.cy + "33", marginTop: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: K.cy, marginBottom: 6 }}>📂 Import Site Data</div>
+        <div style={{ fontSize: 9, color: K.dm, marginBottom: 6 }}>Supported: <strong>DXF</strong> (AutoCAD), <strong>GeoJSON</strong>, <strong>KML</strong> (Google Earth), <strong>CSV</strong> (X,Y,Z,Name,Type,Height,Width,Length), <strong>WKT</strong></div>
+        <div style={{ fontSize: 8, color: K.mu, marginBottom: 4 }}>CSV columns: X,Y required | Z,Name,Type,Height,Width,Length optional | Distance,Bearing auto-calculated from X,Y</div>
+        <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+          {btn("📋 CSV Template", () => {
+            const tmpl = "X,Y,Z,Name,Type,Height,Width,Length\n# ── OBSTACLES (rows with Height > 0) ──\n150.0,200.0,48.0,Water Tank,building,8,8,8\n320.0,180.0,47.5,Antenna Mast,antenna,22,2,2\n80.0,290.0,48.2,AC Plant,building,4,12,6\n400.0,150.0,47.0,Light Pole,pole,6,1,1\n250.0,350.0,46.5,Tree Line,tree,10,5,20\n# ── TERRAIN POINTS (no Height) ──\n0.0,0.0,48.5,NW Corner,,,\n500.0,0.0,47.0,NE Corner,,,\n500.0,400.0,46.0,SE Corner,,,\n0.0,400.0,47.5,SW Corner,,,\n250.0,200.0,47.8,Center,,,\n# Distance and Bearing columns are optional - auto-calculated from X,Y";
+            const blob = new Blob([tmpl], { type: "text/csv" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "hvs_template.csv"; a.click();
+          }, "ghost")}
+          {btn("📋 GeoJSON Template", () => {
+            const tmpl = JSON.stringify({ type: "FeatureCollection", features: [{ type: "Feature", properties: { name: "Site Boundary" }, geometry: { type: "Polygon", coordinates: [[[0,0,48],[300,0,48],[300,300,47],[0,300,47.5],[0,0,48]]] } }, { type: "Feature", properties: { name: "Building A", height: 12 }, geometry: { type: "Polygon", coordinates: [[[100,100],[120,100],[120,115],[100,115],[100,100]]] } }] }, null, 2);
+            const blob = new Blob([tmpl], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "hvs_template.geojson"; a.click();
+          }, "ghost")}
+        </div>
+        <div style={{ fontSize: 8, color: K.mu, marginBottom: 8, background: K.pn, padding: "4px 6px", borderRadius: 3 }}>
+          Closed polygons → site boundary (largest) / zones (medium) / obstacles (small). Points with Height column → obstacles. Points without → terrain elevation data. Auto-detects format.
+        </div>
+        {btn("📁 Upload File", () => {
+          const input = document.createElement("input"); input.type = "file"; input.accept = ".dxf,.geojson,.json,.kml,.csv,.txt,.wkt";
+          input.onchange = (e) => { const f = e.target.files[0]; if (!f) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              try {
+                const parsed = parseAnyFile(ev.target.result, f.name);
+                const result = importFileData(parsed, site.sw, site.sh);
+                const summary = { format: parsed.format, total: parsed.count, boundary: result.boundary.length, zones: result.zones.length, obs: result.obstacles.length, terrain: result.terrainPts.length };
+
+                // Apply boundary
+                if (result.boundary.length >= 3) dp({ type: "US", payload: { boundary: result.boundary } });
+
+                // Apply terrain
+                if (result.terrainPts.length) dp({ type: "US", payload: { terrainFeatures: [...(site.terrainFeatures || []), mkTerrainFeature({ nm: "Imported terrain", tp: "surface", points: result.terrainPts, elevPeak: Math.max(...result.terrainPts.map(p => p.z)), elevBase: Math.min(...result.terrainPts.map(p => p.z)) })] } });
+
+                // Apply zones WITH obstacles attached
+                if (result.zones.length) {
+                  const newZones = result.zones.map((z, i) => {
+                    // Distribute obstacles to nearest zone
+                    if (i === 0 && result.obstacles.length) {
+                      return { ...z, obs: result.obstacles };
+                    }
+                    return z;
+                  });
+                  dp({ type: "SZ", payload: newZones });
+                } else if (result.obstacles.length && zones.length) {
+                  // No new zones but have obstacles — add to selected/first zone
+                  const targetZ = sel || zones[0]?.id;
+                  if (targetZ) {
+                    const existingZ = zones.find(z => z.id === targetZ);
+                    if (existingZ) {
+                      const updatedZones = zones.map(z => z.id === targetZ ? { ...z, obs: [...z.obs, ...result.obstacles] } : z);
+                      dp({ type: "SZ", payload: updatedZones });
+                    }
+                  }
+                }
+
+                dp({ type: "US", payload: { importResult: summary } });
+              } catch(err) { console.error("Import error:", err); dp({ type: "US", payload: { importResult: { format: "Error", total: 0, boundary: 0, zones: 0, obs: 0, terrain: 0, error: err.message } } }); }
+            };
+            reader.readAsText(f);
+          };
+          input.click();
+        }, "accent")}
+        {site.importResult && <div style={{ fontSize: 9, color: site.importResult.error ? K.rd : K.gn, marginTop: 4 }}>{site.importResult.error ? "✗ Error: " + site.importResult.error : "✓ " + site.importResult.format + ": " + site.importResult.total + " items → " + (site.importResult.boundary > 0 ? site.importResult.boundary + " boundary pts, " : "") + site.importResult.zones + " zones, " + site.importResult.obs + " obstacles" + (site.importResult.terrain > 0 ? ", " + site.importResult.terrain + " terrain pts" : "")}</div>}
+      </div>
+      {/* SITE BOUNDARY (N-point polygon) */}
+      {(site.boundary || []).length >= 3 && (
+        <div style={{ background: K.sf, borderRadius: 8, padding: 12, border: "1px solid " + K.gn + "33", marginTop: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: K.gn }}>🗺 Site Boundary ({site.boundary.length} points)</span>
+            {btn("Clear", () => dp({ type: "US", payload: { boundary: [] } }), "ghost")}
+          </div>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", maxHeight: 60, overflowY: "auto" }}>
+            {site.boundary.map((p, i) => <span key={i} style={{ fontSize: 8, color: K.dm, background: K.rs, borderRadius: 2, padding: "1px 4px" }}>{p.x.toFixed(1)},{p.y.toFixed(1)}{p.z ? "," + p.z.toFixed(1) : ""}</span>)}
+          </div>
+        </div>
+      )}
+      {/* TERRAIN FEATURES */}
+      <div className="hvs-card" style={{ padding: 12, marginTop: 8 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: K.gn }}>⛰ Terrain Features ({(site.terrainFeatures || []).length})</span>
+          {btn("+ Add", () => dp({ type: "US", payload: { terrainFeatures: [...(site.terrainFeatures || []), mkTerrainFeature()] } }), "ghost")}
+        </div>
+        <div style={{ fontSize: 8, color: K.mu, marginBottom: 4 }}>Hills, ridges, valleys — add manually or imported from file. Peak elevation used for obstacle analysis.</div>
+        {(site.terrainFeatures || []).map((tf, i) => (
+          <div key={tf.id} style={{ background: K.rs, borderRadius: 4, padding: 6, marginBottom: 3 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr auto", gap: 4, alignItems: "end" }}>
+              <div>{lbl("Name")}{inp("text", tf.nm, v => { const nf = [...(site.terrainFeatures || [])]; nf[i] = { ...nf[i], nm: v }; dp({ type: "US", payload: { terrainFeatures: nf } }); })}</div>
+              <div>{lbl("Type")}{sel_(tf.tp, v => { const nf = [...(site.terrainFeatures || [])]; nf[i] = { ...nf[i], tp: v }; dp({ type: "US", payload: { terrainFeatures: nf } }); }, [{ v: "hill", l: "Hill" }, { v: "ridge", l: "Ridge" }, { v: "valley", l: "Valley" }, { v: "slope", l: "Slope" }, { v: "cliff", l: "Cliff" }, { v: "surface", l: "Surface" }])}</div>
+              <div>{lbl("Peak (m)")}{inp("number", tf.elevPeak, v => { const nf = [...(site.terrainFeatures || [])]; nf[i] = { ...nf[i], elevPeak: v }; dp({ type: "US", payload: { terrainFeatures: nf } }); }, { suffix: "m" })}</div>
+              <div>{lbl("Base (m)")}{inp("number", tf.elevBase, v => { const nf = [...(site.terrainFeatures || [])]; nf[i] = { ...nf[i], elevBase: v }; dp({ type: "US", payload: { terrainFeatures: nf } }); }, { suffix: "m" })}</div>
+              <div>{lbl("Radius")}{inp("number", tf.radius, v => { const nf = [...(site.terrainFeatures || [])]; nf[i] = { ...nf[i], radius: v }; dp({ type: "US", payload: { terrainFeatures: nf } }); }, { suffix: "m" })}</div>
+              <button onClick={() => { const nf = (site.terrainFeatures || []).filter((_, j) => j !== i); dp({ type: "US", payload: { terrainFeatures: nf } }); }} style={{ background: K.rd + "18", color: K.rd, border: "1px solid " + K.rd + "33", borderRadius: 3, fontSize: 8, padding: "4px 6px", cursor: "pointer", marginBottom: 12 }}>✕</button>
+            </div>
+            {tf.points?.length > 0 && <div style={{ fontSize: 8, color: K.cy, marginTop: 2 }}>{tf.points.length} elevation points imported | Peak: {tf.elevPeak}m | Base: {tf.elevBase}m | Rise: {(tf.elevPeak - tf.elevBase).toFixed(1)}m</div>}
+          </div>
+        ))}
+      </div>
+      </div>
+    </div>
