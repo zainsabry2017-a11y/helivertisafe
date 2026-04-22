@@ -4,6 +4,7 @@
 import * as XLSX from "xlsx";
 import { mkObs } from "../data/models.js";
 import { OBS_TYPES } from "../data/constants.js";
+import { latLngToLocal } from "../utils/mapGeo.js";
 
 const HDR = (s) =>
   String(s || "")
@@ -30,7 +31,7 @@ function normType(s) {
     crane: "crane",
     line: "powerline",
     power: "powerline",
-    fence: "other",
+    fence: "fence",
     ground: "terrain_high",
     topo: "terrain_high",
     vehicle: "other",
@@ -172,5 +173,83 @@ export function parseDroneClassificationCsv(text) {
     );
   }
   if (!obs.length) throw new Error("No valid X,Y rows in drone CSV.");
+  return obs;
+}
+
+function parseBoolish(v) {
+  const s = String(v ?? "").trim().toLowerCase();
+  if (!s) return false;
+  if (["1", "true", "yes", "y", "t"].includes(s)) return true;
+  if (["0", "false", "no", "n", "f"].includes(s)) return false;
+  return false;
+}
+
+/**
+ * OLS export CSV (lat/lng) import.
+ * Expected headers (case-insensitive, tolerant):
+ * - ID
+ * - Latitude
+ * - Longitude / Logitude
+ * - TYPE
+ * - height_agl
+ * - elev_is_base (optional; can be 0/1, true/false)
+ * - elevation_t / elevation_top / elevation_total / elevation (optional)
+ *
+ * Converts lat/lng to site-local meters (x east, y south).
+ */
+export function parseOlsCsv(text, site) {
+  const lines = String(text || "")
+    .trim()
+    .split(/\r?\n/)
+    .filter((l) => l.trim());
+  if (lines.length < 2) throw new Error("OLS CSV is empty (need header + at least 1 row).");
+
+  const header = lines[0].split(/[,;\t]/).map((h) => String(h ?? "").trim());
+  const hmap = headerIndexMap(header);
+  const iId = pick(hmap, ["id", "name", "obstacle_id"]);
+  const iLat = pick(hmap, ["latitude", "lat"]);
+  const iLng = pick(hmap, ["longitude", "logitude", "lng", "lon"]);
+  const iType = pick(hmap, ["type", "classification", "class", "category"]);
+  const iH = pick(hmap, ["height_agl", "agl", "height", "h"]);
+  const iIsBase = pick(hmap, ["elev_is_base", "elev_is_ba", "is_base", "base"]);
+  const iElev = pick(hmap, ["elevation_t", "elevation_top", "elevation_total", "elevation", "elev", "z"]);
+
+  if (iLat < 0 || iLng < 0) throw new Error("OLS CSV needs Latitude and Longitude columns.");
+  if (iH < 0) throw new Error("OLS CSV needs height_agl column.");
+
+  const obs = [];
+  for (let r = 1; r < lines.length; r++) {
+    const c = lines[r].split(/[,;\t]/).map((x) => String(x ?? "").trim());
+    const lat = parseFloat(c[iLat]);
+    const lng = parseFloat(c[iLng]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+    const id = iId >= 0 ? String(c[iId] || "").trim() : "";
+    const tpRaw = iType >= 0 ? c[iType] : "";
+    const hAgl = parseFloat(c[iH]);
+    if (!Number.isFinite(hAgl)) continue;
+
+    const elevRaw = iElev >= 0 ? parseFloat(c[iElev]) : 0;
+    const elevIsBase = iIsBase >= 0 ? parseBoolish(c[iIsBase]) : true; // default to base elevation
+    const baseElev = Number.isFinite(elevRaw)
+      ? (elevIsBase ? elevRaw : Math.max(0, elevRaw - hAgl))
+      : 0;
+
+    const { x, y } = latLngToLocal(site, lat, lng);
+    obs.push(
+      mkObs({
+        nm: id || "OLS",
+        tp: classificationToObsType(tpRaw),
+        x,
+        y,
+        elevAMSL: baseElev,
+        h: Math.max(0, hAgl),
+        confidence: 85,
+        srcTag: "ols_csv",
+      })
+    );
+  }
+
+  if (!obs.length) throw new Error("No valid rows found in OLS CSV (check lat/lng and height_agl).");
   return obs;
 }

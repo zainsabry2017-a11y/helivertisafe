@@ -3,9 +3,65 @@ import { mkProj, mkSite, mkObs, mkSens, mkAccNode, mkDest, mkExclusion, mkLog } 
 import { calcAllScores, makeRecs } from "../engine/scoring.js";
 import { loadDemo } from "../data/demo.js";
 import { zonePadCenter } from "../engine/geometry.js";
+import { latLngToLocal } from "../utils/mapGeo.js";
 
 const SKIP_UNDO = ["STEP", "TAB", "SEL"];
 const MAX_UNDO = 30;
+
+function isLikelyWgs84Degrees(n) {
+  return Number.isFinite(n) && Math.abs(n) <= 180;
+}
+
+function scoreLocalCandidate(site, p) {
+  const sw = site?.sw || 500;
+  const sh = site?.sh || 500;
+  const cx = sw / 2;
+  const cy = sh / 2;
+  const dx = (p.x ?? 0) - cx;
+  const dy = (p.y ?? 0) - cy;
+  const dist2 = dx * dx + dy * dy;
+  const inRange = p.x >= -sw && p.x <= sw * 2 && p.y >= -sh && p.y <= sh * 2;
+  return (inRange ? 0 : 1e12) + dist2;
+}
+
+function maybeWgs84PointToLocal(site, pt) {
+  const x = pt?.x;
+  const y = pt?.y;
+  if (!isLikelyWgs84Degrees(x) || !isLikelyWgs84Degrees(y)) return pt;
+
+  // Try both interpretations because some sources store {x:lng,y:lat}.
+  const cand1 = latLngToLocal(site, x, y); // {x:lat, y:lng}
+  const cand2 = latLngToLocal(site, y, x); // {x:lng, y:lat}
+  return scoreLocalCandidate(site, cand1) <= scoreLocalCandidate(site, cand2) ? cand1 : cand2;
+}
+
+function normalizeImportedZones(site, zones) {
+  if (!Array.isArray(zones)) return [];
+  return zones.map((z) => {
+    const next = { ...z };
+    if (Array.isArray(next.corners) && next.corners.length >= 3) {
+      next.corners = next.corners.map((c) => maybeWgs84PointToLocal(site, c));
+    }
+    if (next.pad && Number.isFinite(next.pad.x) && Number.isFinite(next.pad.y)) {
+      next.pad = maybeWgs84PointToLocal(site, next.pad);
+    }
+    if (Array.isArray(next.obs)) {
+      next.obs = next.obs.map((o) => {
+        const oo = { ...o };
+        if (Array.isArray(oo.corners) && oo.corners.length >= 3) {
+          oo.corners = oo.corners.map((c) => maybeWgs84PointToLocal(site, c));
+        }
+        if (Number.isFinite(oo.x) && Number.isFinite(oo.y)) {
+          const p = maybeWgs84PointToLocal(site, { x: oo.x, y: oo.y });
+          oo.x = p.x;
+          oo.y = p.y;
+        }
+        return oo;
+      });
+    }
+    return next;
+  });
+}
 
 function reducer(state, action) {
   const { type, payload } = action;
@@ -153,7 +209,9 @@ function reducer(state, action) {
     case "IMPORT": {
       const d = payload;
       const log = [...(d.proj?.auditLog || []), mkLog("Project Imported", d.proj?.nm || "")];
-      return { step: 0, proj: { ...d.proj, auditLog: log }, site: d.site, zones: d.zones, sel: d.zones[0]?.id || null, recs: [], scored: false, tab: "overview", scenarios: d.scenarios || state.scenarios || [] };
+      const site = d.site || mkSite();
+      const zones = normalizeImportedZones(site, d.zones);
+      return { step: 0, proj: { ...d.proj, auditLog: log }, site, zones, sel: zones[0]?.id || null, recs: [], scored: false, tab: "overview", scenarios: d.scenarios || state.scenarios || [] };
     }
     case "RESET": { return { step: 0, proj: mkProj(), site: mkSite(), zones: [], sel: null, recs: [], scored: false, tab: "overview", scenarios: state.scenarios || [] }; }
     case "APPLY_ALL": {

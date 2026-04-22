@@ -33,6 +33,13 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 460, onSnaps
   const G = useMemo(() => calcGeom(proj), [proj]);
   const cent = useMemo(() => zone ? zonePadCenter(zone) : { x: 0, y: 0 }, [zone]);
 
+  const isFenceObstacle = (o) => {
+    const tp = String(o?.tp || "").toLowerCase();
+    if (tp === "fence") return true;
+    const nm = String(o?.nm || "").toLowerCase();
+    return nm.includes("fence");
+  };
+
   useEffect(() => {
     if (!mountRef.current || !zone || !THREE) return;
     try {
@@ -57,7 +64,8 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 460, onSnaps
       preserveDrawingBuffer: true,
     });
     renderer.setSize(w, h);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Keep startup fast; 3D panel is schematic (not photoreal).
+    renderer.setPixelRatio(1);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -78,8 +86,8 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 460, onSnaps
     dir.position.set(maxDist * 0.9, maxDist * 1.55, maxDist * 0.65);
     dir.castShadow = true;
     if (dir.shadow) {
-      dir.shadow.mapSize.width = 2048;
-      dir.shadow.mapSize.height = 2048;
+      dir.shadow.mapSize.width = 1024;
+      dir.shadow.mapSize.height = 1024;
       dir.shadow.camera.near = 1;
       dir.shadow.camera.far = maxDist * 8;
       dir.shadow.camera.left = -maxDist * 2;
@@ -194,7 +202,8 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 460, onSnaps
       const color = pen ? 0xef4444 : pen12 ? 0xf59e0b : 0x10b981;
       const emissive = color;
       let ox, oz;
-      if (o.corners && o.corners.length >= 4) {
+      const isFence = isFenceObstacle(o);
+      if (o.corners && o.corners.length >= (isFence ? 2 : 3)) {
         ox = o.corners.reduce((s, c) => s + c.x, 0) / o.corners.length - cent.x;
         oz = o.corners.reduce((s, c) => s + c.y, 0) / o.corners.length - cent.y;
       } else if (Number.isFinite(o.x) && Number.isFinite(o.y) && !(o.x === 0 && o.y === 0)) {
@@ -209,27 +218,107 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 460, onSnaps
       const bl = o.l || bw;
       const bh = Math.max(o.h, 1);
 
-      // Main building body
-      const geo = new THREE.BoxGeometry(bw, bh, bl);
-      const mat = new THREE.MeshStandardMaterial({
-        color,
-        transparent: true,
-        opacity: 0.72,
-        emissive,
-        emissiveIntensity: pen ? 0.22 : 0.08,
-        roughness: 0.48,
-        metalness: 0.18,
-      });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(ox, bh / 2, oz);
-      mesh.castShadow = true;
-      scene.add(mesh);
+      // Fence: draw as connected polyline
+      if (isFence && o.corners && o.corners.length >= 2) {
+        const h = Math.max(0.6, Number(o.h) || 1.2);
+        const baseY = 0.2;
+        const pts = o.corners.map((c) => ({ x: c.x - cent.x, z: c.y - cent.y }));
 
-      // Edge wireframe
-      const edge = new THREE.EdgesGeometry(geo);
-      const line = new THREE.LineSegments(edge, new THREE.LineBasicMaterial({ color }));
-      line.position.set(ox, bh / 2, oz);
-      scene.add(line);
+        // Rails (bottom + top)
+        const bottom = new THREE.BufferGeometry().setFromPoints(pts.map((p) => new THREE.Vector3(p.x, baseY, p.z)));
+        const top = new THREE.BufferGeometry().setFromPoints(pts.map((p) => new THREE.Vector3(p.x, baseY + h, p.z)));
+        const railMat = new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.85 });
+        scene.add(new THREE.Line(bottom, railMat));
+        scene.add(new THREE.Line(top, railMat));
+
+        // Posts
+        const spacingM = 3; // visual + performance balance
+        const postR = 0.18;
+        const postGeo = new THREE.CylinderGeometry(postR, postR, h, 10);
+        const postMat = new THREE.MeshStandardMaterial({
+          color: 0x38bdf8,
+          transparent: true,
+          opacity: 0.55,
+          emissive: 0x0ea5e9,
+          emissiveIntensity: 0.08,
+          roughness: 0.65,
+          metalness: 0.08,
+        });
+
+        const addPost = (x, z) => {
+          const p = new THREE.Mesh(postGeo, postMat);
+          p.position.set(x, baseY + h / 2, z);
+          p.castShadow = true;
+          scene.add(p);
+        };
+
+        for (let i = 0; i < pts.length - 1; i++) {
+          const a = pts[i];
+          const b = pts[i + 1];
+          const dx = b.x - a.x;
+          const dz = b.z - a.z;
+          const segLen = Math.hypot(dx, dz);
+          if (segLen <= 0.001) continue;
+          const n = Math.max(1, Math.floor(segLen / spacingM));
+          for (let k = 0; k <= n; k++) {
+            const t = k / n;
+            addPost(a.x + dx * t, a.z + dz * t);
+          }
+        }
+        return;
+      }
+
+      // Building / object: if polygon footprint exists, extrude it (supports 3+ corners)
+      if (o.corners && o.corners.length >= 3) {
+        const cx = o.corners.reduce((s, c) => s + c.x, 0) / o.corners.length;
+        const cy = o.corners.reduce((s, c) => s + c.y, 0) / o.corners.length;
+        const shape = new THREE.Shape(
+          o.corners.map((c, idx) => {
+            const x = c.x - cx;
+            const y = c.y - cy;
+            return idx === 0 ? new THREE.Vector2(x, y) : new THREE.Vector2(x, y);
+          })
+        );
+        const geo = new THREE.ExtrudeGeometry(shape, { depth: bh, bevelEnabled: false });
+        geo.rotateX(-Math.PI / 2);
+        const mat = new THREE.MeshStandardMaterial({
+          color,
+          transparent: true,
+          opacity: 0.72,
+          emissive,
+          emissiveIntensity: pen ? 0.22 : 0.08,
+          roughness: 0.48,
+          metalness: 0.18,
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(cx - cent.x, 0, cy - cent.y);
+        mesh.castShadow = true;
+        scene.add(mesh);
+        const edge = new THREE.EdgesGeometry(geo);
+        const eLine = new THREE.LineSegments(edge, new THREE.LineBasicMaterial({ color }));
+        eLine.position.copy(mesh.position);
+        scene.add(eLine);
+      } else {
+        // Fallback: box using W/L/H
+        const geo = new THREE.BoxGeometry(bw, bh, bl);
+        const mat = new THREE.MeshStandardMaterial({
+          color,
+          transparent: true,
+          opacity: 0.72,
+          emissive,
+          emissiveIntensity: pen ? 0.22 : 0.08,
+          roughness: 0.48,
+          metalness: 0.18,
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(ox, bh / 2, oz);
+        mesh.castShadow = true;
+        scene.add(mesh);
+        const edge = new THREE.EdgesGeometry(geo);
+        const line = new THREE.LineSegments(edge, new THREE.LineBasicMaterial({ color }));
+        line.position.set(ox, bh / 2, oz);
+        scene.add(line);
+      }
 
       // Height line from ground to top
       scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(ox, 0, oz), new THREE.Vector3(ox, bh, oz)]), new THREE.LineBasicMaterial({ color: 0x8896ab })));

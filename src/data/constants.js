@@ -120,7 +120,7 @@ export const HELIS = [
   { id: "lilium_jet", nm: "Lilium Jet", D: 13.9, mtow: 3175, cat: "light", xw: 15, tp: "evtol", len: 13.9, wid: 8.5, rtr: 0, dw: "low", pax: 6 },
   { id: "custom", nm: "Custom (enter D-value)", D: 0, mtow: 0, cat: "medium", xw: 15, tp: "heli", len: 0, wid: 0, rtr: 0, dw: "medium" },
 ];
-export const OBS_TYPES = ["building","tower","tree","antenna","crane","powerline","terrain_high","other"];
+export const OBS_TYPES = ["building","tower","tree","antenna","crane","powerline","terrain_high","fence","other"];
 export const SOIL_DATA = [
   { value: "rock", label: "Rock", cbr: 80 },
   { value: "firm", label: "Firm", cbr: 50 },

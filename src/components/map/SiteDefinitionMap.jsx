@@ -50,6 +50,13 @@ async function nominatimSearch(query) {
   return res.json();
 }
 
+function isFenceObstacle(o) {
+  const tp = String(o?.tp || "").toLowerCase();
+  if (tp === "fence") return true;
+  const nm = String(o?.nm || "").toLowerCase();
+  return nm.includes("fence");
+}
+
 export function SiteDefinitionMap({ site, zones, dp }) {
   const wrapRef = useRef(null);
   const mapRef = useRef(null);
@@ -237,15 +244,21 @@ export function SiteDefinitionMap({ site, zones, dp }) {
             const p = localToLatLng(site, c.x, c.y);
             return [p.lat, p.lng];
           });
-          L.polygon(latlngs, {
-            color: K.am,
-            weight: 1.5,
-            fillColor: K.am,
-            fillOpacity: 0.18,
-            dashArray: "4 3",
-          })
-            .bindTooltip(tip, { sticky: true })
-            .addTo(fg);
+          if (isFenceObstacle(o)) {
+            L.polyline(latlngs, { color: K.am, weight: 2, opacity: 0.9, dashArray: "6 4" })
+              .bindTooltip(tip, { sticky: true })
+              .addTo(fg);
+          } else {
+            L.polygon(latlngs, {
+              color: K.am,
+              weight: 1.5,
+              fillColor: K.am,
+              fillOpacity: 0.18,
+              dashArray: "4 3",
+            })
+              .bindTooltip(tip, { sticky: true })
+              .addTo(fg);
+          }
         } else {
           const { x, y } = obstacleSitePosition(z, o);
           const p = localToLatLng(site, x, y);

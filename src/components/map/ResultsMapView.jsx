@@ -35,6 +35,13 @@ function hexToRgb(hex) {
   return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
 }
 
+function isFenceObstacle(o) {
+  const tp = String(o?.tp || "").toLowerCase();
+  if (tp === "fence") return true;
+  const nm = String(o?.nm || "").toLowerCase();
+  return nm.includes("fence");
+}
+
 export function ResultsMapView({ site, zones, proj, sel, onSelectZone }) {
   const wrapRef = useRef(null);
   const mapRef = useRef(null);
@@ -183,14 +190,20 @@ export function ResultsMapView({ site, zones, proj, sel, onSelectZone }) {
             const p = localToLatLng(site, c.x, c.y);
             return [p.lat, p.lng];
           });
-          L.polygon(latlngs, {
-            color: K.rd,
-            weight: 1.5,
-            fillColor: K.am,
-            fillOpacity: 0.18,
-          })
-            .bindTooltip(tip, { sticky: true })
-            .addTo(fg);
+          if (isFenceObstacle(o)) {
+            L.polyline(latlngs, { color: K.am, weight: 2, opacity: 0.9 })
+              .bindTooltip(tip, { sticky: true })
+              .addTo(fg);
+          } else {
+            L.polygon(latlngs, {
+              color: K.rd,
+              weight: 1.5,
+              fillColor: K.am,
+              fillOpacity: 0.18,
+            })
+              .bindTooltip(tip, { sticky: true })
+              .addTo(fg);
+          }
         } else {
           const { x, y } = obstacleSitePosition(z, o);
           const p = localToLatLng(site, x, y);

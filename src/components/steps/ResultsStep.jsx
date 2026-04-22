@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useHvs } from "../../context/HvsContext.jsx";
 import { gradeCol, scoreCol } from "../../utils/theme.js";
 import { PC_DATA, HELIS, WT } from "../../data/constants.js";
@@ -9,7 +9,6 @@ import { genSuggestions } from "../../engine/suggestions.js";
 import { calcResponseTime } from "../../engine/responseTime.js";
 import { optimizePadCenter } from "../../engine/padOptimizer.js";
 import { ErrorBoundary } from "../ui/ErrorBoundary.jsx";
-import { Obs3D } from "../charts/Obs3D.jsx";
 import { WindRose } from "../charts/WindRose.jsx";
 import { OLSChart } from "../charts/OLSChart.jsx";
 import { ScoreRadar } from "../charts/ScoreRadar.jsx";
@@ -43,6 +42,8 @@ import {
   IconTrash,
 } from "../branding/HvsToolbarIcons.jsx";
 
+const LazyObs3D = React.lazy(() => import("../charts/Obs3DLazy.jsx"));
+
 export function ResultsStep() {
   const {
     K, dp, proj, site, zones, sel, selZ, scored, tab, scenarios, recs,
@@ -57,6 +58,30 @@ export function ResultsStep() {
   const obs3dRef = useRef(null);
   const [ols3dPngCache, setOls3dPngCache] = useState(null);
   const [windRoseExportErr, setWindRoseExportErr] = useState("");
+  const [mountOls3d, setMountOls3d] = useState(false);
+  const [ols3dBusy, setOls3dBusy] = useState(false);
+
+  // Mount the heavy 3D view only after OLS tab is visible and the browser is idle.
+  useEffect(() => {
+    if (tab !== "ols" || !selZ?.sc) return;
+    if (mountOls3d) return;
+    setOls3dBusy(true);
+    const schedule = (cb) => {
+      if (typeof window.requestIdleCallback === "function") {
+        return window.requestIdleCallback(cb, { timeout: 800 });
+      }
+      return window.setTimeout(cb, 120);
+    };
+    const cancel = (id) => {
+      if (typeof window.cancelIdleCallback === "function") window.cancelIdleCallback(id);
+      else window.clearTimeout(id);
+    };
+    const id = schedule(() => {
+      setMountOls3d(true);
+      setTimeout(() => setOls3dBusy(false), 50);
+    });
+    return () => cancel(id);
+  }, [tab, selZ?.id, selZ?.sc, mountOls3d]);
 
   if (!scored) return <div className="hvs-card" style={{ padding: 16 }}><p style={{ color: K.dm, textAlign: "center" }}>Run analysis first</p></div>;
   const rk = [...zones].filter(z => z.sc).sort((a, b) => b.sc.tot - a.sc.tot);
@@ -516,7 +541,27 @@ export function ResultsStep() {
             {/* 3D ISOMETRIC VIEW */}
             <div style={{ marginTop: 10, display: "flex", justifyContent: "center" }}>
               <ErrorBoundary label="3D OLS View">
-                <Obs3D ref={obs3dRef} zone={selZ} proj={proj} size={500} onSnapshotReady={setOls3dPngCache} />
+                {mountOls3d ? (
+                  <Suspense
+                    fallback={
+                      <div className="hvs-card" style={{ padding: 18, width: 540, textAlign: "center" }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: K.cy }}>Loading 3D OLS view…</div>
+                        <div style={{ fontSize: 13, color: K.dm, marginTop: 6 }}>The cross-section above is ready; 3D loads in the background.</div>
+                      </div>
+                    }
+                  >
+                    <LazyObs3D ref={obs3dRef} zone={selZ} proj={proj} size={500} onSnapshotReady={setOls3dPngCache} />
+                  </Suspense>
+                ) : (
+                  <div className="hvs-card" style={{ padding: 18, width: 540, textAlign: "center" }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: K.cy }}>
+                      {ols3dBusy ? "Preparing 3D OLS view…" : "3D OLS view queued"}
+                    </div>
+                    <div style={{ fontSize: 13, color: K.dm, marginTop: 6 }}>
+                      Opening this tab stays fast; 3D initializes when the browser is idle.
+                    </div>
+                  </div>
+                )}
               </ErrorBoundary>
             </div>
           </>}

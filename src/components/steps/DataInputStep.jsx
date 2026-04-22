@@ -13,7 +13,7 @@ import { OLSBar } from "../ui/OLSBar.jsx";
 import { Tag } from "../ui/Tag.jsx";
 import { ZGrid } from "../ui/ZGrid.jsx";
 import { parseWindRoseCsv, parseMetarWindPaste, parseWindRoseTable, applyImportToWind } from "../../engine/windRoseImport.js";
-import { parseObstacleXlsxArrayBuffer, parsePnezdText, parseDroneClassificationCsv } from "../../engine/obstacleSurveyImport.js";
+import { parseObstacleXlsxArrayBuffer, parsePnezdText, parseDroneClassificationCsv, parseOlsCsv } from "../../engine/obstacleSurveyImport.js";
 import { parseElevationCsv, computeTerrainAnalysis } from "../../engine/terrainMesh.js";
 import { StartHereCard } from "../ui/StartHereCard.jsx";
 
@@ -73,6 +73,12 @@ export function DataInputStep() {
   }
   const z = selZ;
   const comp = zoneCompleteness(z);
+  const isFenceObstacle = (o) => {
+    const tp = String(o?.tp || "").toLowerCase();
+    if (tp === "fence") return true;
+    const nm = String(o?.nm || "").toLowerCase();
+    return nm.includes("fence");
+  };
   const dataTabs = [
     { id: "wind", l: "💨 Wind", done: comp.wind },
     { id: "obs", l: "🚧 Obstacles", done: comp.obs },
@@ -350,18 +356,30 @@ export function DataInputStep() {
               {sel_(obSurMode, (v) => setObSurMode(v), [
                 { v: "pnezd", l: "PNEZD text" },
                 { v: "drone", l: "Drone XYZ class CSV" },
+                { v: "ols", l: "OLS CSV (ID, Lat, Lng, TYPE…)" },
               ])}
             </div>
             <textarea
               value={obSurPaste}
               onChange={(e) => setObSurPaste(e.target.value)}
-              placeholder={obSurMode === "pnezd" ? "Point,Northing,Easting,Z,Description (one row per line)" : "Header: X,Y,Z,Classification then data rows"}
+              placeholder={
+                obSurMode === "pnezd"
+                  ? "Point,Northing,Easting,Z,Description (one row per line)"
+                  : obSurMode === "ols"
+                  ? "ID,Latitude,Longitude,TYPE,height_agl,elev_is_base,elevation_t\n..."
+                  : "Header: X,Y,Z,Classification then data rows"
+              }
               rows={3}
               style={{ width: "100%", background: K.rs, border: "1px solid " + K.bd, borderRadius: 4, padding: 6, color: K.tx, fontSize: 13, fontFamily: "monospace" }}
             />
             {btn("Append obstacles", () => {
               try {
-                const add = obSurMode === "pnezd" ? parsePnezdText(obSurPaste) : parseDroneClassificationCsv(obSurPaste);
+                const add =
+                  obSurMode === "pnezd"
+                    ? parsePnezdText(obSurPaste)
+                    : obSurMode === "ols"
+                    ? parseOlsCsv(obSurPaste, site)
+                    : parseDroneClassificationCsv(obSurPaste);
                 dp({ type: "OB_SURVEY", payload: { zid: z.id, add } });
               } catch (err) {
                 alert(err.message || String(err));
@@ -474,11 +492,65 @@ export function DataInputStep() {
               {/* POLYGON CORNERS (for building footprint — nearest corner used for OLS) */}
               <div style={{ marginTop: 4 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontSize: 13, color: K.dm }}>Building Footprint (4 corners — optional, uses nearest corner for OLS)</span>
-                  {!o.corners?.length && <button onClick={() => dp({ type: "UO", payload: { zid: z.id, oid: o.id, fld: "corners", val: [{ x: (o.x || 0) - 10, y: (o.y || 0) - 10 }, { x: (o.x || 0) + 10, y: (o.y || 0) - 10 }, { x: (o.x || 0) + 10, y: (o.y || 0) + 10 }, { x: (o.x || 0) - 10, y: (o.y || 0) + 10 }] } })} style={{ background: K.cy + "18", color: K.cy, border: "1px solid " + K.cy + "33", borderRadius: 3, fontSize: 14, padding: "2px 6px", cursor: "pointer" }}>+ Add 4 Corners</button>}
-                  {o.corners?.length >= 4 && <button onClick={() => dp({ type: "UO", payload: { zid: z.id, oid: o.id, fld: "corners", val: [] } })} style={{ background: K.rd + "18", color: K.rd, border: "1px solid " + K.rd + "33", borderRadius: 3, fontSize: 14, padding: "2px 6px", cursor: "pointer" }}>Clear Corners</button>}
+                  <span style={{ fontSize: 13, color: K.dm }}>
+                    {isFenceObstacle(o) ? "Fence line (polyline vertices — optional)" : "Footprint (polygon vertices — optional; nearest vertex used for OLS)"}
+                  </span>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    {!o.corners?.length && (
+                      <button
+                        onClick={() => {
+                          const baseX = o.x || 0;
+                          const baseY = o.y || 0;
+                          const def = isFenceObstacle(o)
+                            ? [
+                                { x: baseX - 12, y: baseY },
+                                { x: baseX + 12, y: baseY },
+                              ]
+                            : [
+                                { x: baseX - 10, y: baseY - 10 },
+                                { x: baseX + 10, y: baseY - 10 },
+                                { x: baseX + 10, y: baseY + 10 },
+                                { x: baseX - 10, y: baseY + 10 },
+                              ];
+                          dp({ type: "UO", payload: { zid: z.id, oid: o.id, fld: "corners", val: def } });
+                        }}
+                        style={{ background: K.cy + "18", color: K.cy, border: "1px solid " + K.cy + "33", borderRadius: 3, fontSize: 14, padding: "2px 6px", cursor: "pointer" }}
+                      >
+                        + Add vertices
+                      </button>
+                    )}
+                    {o.corners?.length >= (isFenceObstacle(o) ? 2 : 3) && (
+                      <button
+                        onClick={() => {
+                          const last = o.corners[o.corners.length - 1];
+                          const prev = o.corners[o.corners.length - 2] || last;
+                          const dx = (last.x - prev.x) || 12;
+                          const dy = (last.y - prev.y) || 0;
+                          const nc = [...o.corners, { x: last.x + dx, y: last.y + dy }];
+                          dp({ type: "UO", payload: { zid: z.id, oid: o.id, fld: "corners", val: nc } });
+                        }}
+                        style={{ background: K.bl + "18", color: K.cy, border: "1px solid " + K.cy + "33", borderRadius: 3, fontSize: 14, padding: "2px 6px", cursor: "pointer" }}
+                      >
+                        + Vertex
+                      </button>
+                    )}
+                    {o.corners?.length > (isFenceObstacle(o) ? 2 : 3) && (
+                      <button
+                        onClick={() => {
+                          const nc = o.corners.slice(0, -1);
+                          dp({ type: "UO", payload: { zid: z.id, oid: o.id, fld: "corners", val: nc } });
+                        }}
+                        style={{ background: K.am + "14", color: K.am, border: "1px solid " + K.am + "33", borderRadius: 3, fontSize: 14, padding: "2px 6px", cursor: "pointer" }}
+                      >
+                        − Vertex
+                      </button>
+                    )}
+                    {o.corners?.length >= 2 && (
+                      <button onClick={() => dp({ type: "UO", payload: { zid: z.id, oid: o.id, fld: "corners", val: [] } })} style={{ background: K.rd + "18", color: K.rd, border: "1px solid " + K.rd + "33", borderRadius: 3, fontSize: 14, padding: "2px 6px", cursor: "pointer" }}>Clear</button>
+                    )}
+                  </div>
                 </div>
-                {o.corners && o.corners.length >= 4 && (
+                {o.corners && o.corners.length >= (isFenceObstacle(o) ? 2 : 3) && (
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 3, marginTop: 4 }}>
                     {o.corners.map((cn, ci) => (
                       <div key={ci} style={{ background: K.pn, borderRadius: 3, padding: "3px 4px" }}>
@@ -490,7 +562,7 @@ export function DataInputStep() {
                     ))}
                   </div>
                 )}
-                {o.corners && o.corners.length >= 4 && (() => {
+                {!isFenceObstacle(o) && o.corners && o.corners.length >= 3 && (() => {
                   const cent = zonePadCenter(z);
                   const nd = obsNearestDist(o, cent.x, cent.y);
                   return <div style={{ fontSize: 14, color: K.cy, marginTop: 2 }}>Nearest corner: {nd.toFixed(1)}m from zone center (this distance used for OLS check)</div>;
