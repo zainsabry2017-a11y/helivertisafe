@@ -20,7 +20,7 @@ export function SiteDefinitionStep() {
         <div>{lbl("Lng")}{inp("number", site.lng, v => dp({ type: "US", payload: { lng: v } }), { suffix: "°", step: 0.0001 })}</div>
         <div>{lbl("Elev")}{inp("number", site.elev, v => dp({ type: "US", payload: { elev: v } }), { suffix: "m" })}</div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 8, marginBottom: 12 }}>
         <div>{lbl("Width")}{inp("number", site.sw, v => dp({ type: "US", payload: { sw: v } }), { suffix: "m", min: 30 })}</div>
         <div>{lbl("Height")}{inp("number", site.sh, v => dp({ type: "US", payload: { sh: v } }), { suffix: "m", min: 30 })}</div>
         <div>{lbl("Mag Decl")}{inp("number", site.md, v => dp({ type: "US", payload: { md: v } }), { suffix: "°" })}</div>

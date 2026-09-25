@@ -297,23 +297,30 @@ export function HelivertiPdfDocument({
           <View>
             <Text style={styles.h1}>Response time analysis</Text>
             <View style={styles.row}>
-              <Text style={[styles.cellL, styles.th]}>Destination</Text>
-              <Text style={[styles.cellS, styles.th]}>Dist</Text>
-              <Text style={[styles.cellS, styles.th]}>Total</Text>
-              <Text style={[styles.cellS, styles.th]}>Limit</Text>
-              <Text style={[styles.cellM, styles.th]}>Status</Text>
+              <Text style={[{ flex: 1.8, fontSize: 8 }, styles.th]}>Destination</Text>
+              <Text style={[{ flex: 0.8, fontSize: 8, textAlign: "center" }, styles.th]}>Dist</Text>
+              <Text style={[{ flex: 0.8, fontSize: 8, textAlign: "center" }, styles.th]}>Flight</Text>
+              <Text style={[{ flex: 0.8, fontSize: 8, textAlign: "center" }, styles.th]}>Ground</Text>
+              <Text style={[{ flex: 0.8, fontSize: 8, textAlign: "center" }, styles.th]}>Total</Text>
+              <Text style={[{ flex: 0.8, fontSize: 8, textAlign: "center" }, styles.th]}>Limit</Text>
+              <Text style={[{ flex: 1.1, fontSize: 8, textAlign: "center" }, styles.th]}>Status</Text>
             </View>
             {responseRows.map(({ d, rt }, i) => (
               <View key={i} style={styles.row}>
-                <Text style={styles.cellL}>{d.nm}</Text>
-                <Text style={styles.cellS}>{rt.distKm} km</Text>
-                <Text style={styles.cellS}>{rt.totalMin} min</Text>
-                <Text style={styles.cellS}>{d.maxMinutes > 0 ? `≤${d.maxMinutes}` : "—"}</Text>
-                <Text style={[styles.cellM, rt.meetsReq ? styles.badgePass : styles.badgeFail]}>
-                  {d.maxMinutes > 0 ? (rt.meetsReq ? "MEETS" : "EXCEEDS") : "—"}
+                <Text style={{ flex: 1.8, fontSize: 8 }}>{d.nm}</Text>
+                <Text style={{ flex: 0.8, fontSize: 8, textAlign: "center" }}>{rt.distKm} km</Text>
+                <Text style={{ flex: 0.8, fontSize: 8, textAlign: "center" }}>{rt.flightMin}m</Text>
+                <Text style={{ flex: 0.8, fontSize: 8, textAlign: "center" }}>{rt.groundMin ? `${rt.groundMin}m` : "0m"}</Text>
+                <Text style={{ flex: 0.8, fontSize: 8, textAlign: "center", fontWeight: "bold" }}>{rt.totalMin}m</Text>
+                <Text style={{ flex: 0.8, fontSize: 8, textAlign: "center" }}>{d.maxMinutes > 0 ? `≤ ${d.maxMinutes}m` : "-"}</Text>
+                <Text style={[{ flex: 1.1, fontSize: 8, textAlign: "center" }, rt.meetsReq ? styles.badgePass : styles.badgeFail]}>
+                  {d.maxMinutes > 0 ? (rt.meetsReq ? "MEETS" : "EXCEEDS") : "-"}
                 </Text>
               </View>
             ))}
+            <Text style={[styles.p, { fontSize: 7.5, color: PAL.muted, marginTop: 4 }]}>
+              Total Time = Startup (3m) + Flight Time (@ ${(site.destinations?.[0]?.cruiseKt || 120)} kt) + Approach (2m) + Ground transfer.
+            </Text>
           </View>
         ) : null}
 

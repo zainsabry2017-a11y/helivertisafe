@@ -215,23 +215,25 @@ export async function downloadHeliReportDocx({
 
   if (dests.length > 0) {
     children.push(h1("3. Response Time Analysis"));
-    const rtHeaders = ["Destination", "Type", "Distance", "Flight", "Total", "Requirement", "Status"];
+    const rtHeaders = ["Destination", "Type", "Distance", "Flight Speed", "Flight Time", "Ground / Car", "Total Time", "Requirement", "Status"];
     const rtRows = dests.map((d) => {
       const rt = calcResponseTime(d, site.lat, site.lng);
       return [
         d.nm || "—",
         d.tp || "—",
         rt ? `${rt.distKm} km` : "—",
+        rt ? `${rt.cruiseKt} kt` : `${d.cruiseKt || 120} kt`,
         rt ? `${rt.flightMin} min` : "—",
+        rt ? (rt.groundMin > 0 ? `${rt.groundMin} min` : "0 min") : "—",
         rt ? `${rt.totalMin} min` : "—",
-        d.maxMinutes > 0 ? `≤${d.maxMinutes} min` : "—",
+        d.maxMinutes > 0 ? `≤ ${d.maxMinutes} min` : "—",
         rt && d.maxMinutes > 0 ? (rt.meetsReq ? "MEETS" : "EXCEEDS") : "—",
       ];
     });
     children.push(tableFromMatrix(rtHeaders, rtRows));
     children.push(
       p(
-        `Response time = startup (3min) + flight time (${hl.nm}) + approach (2min) + ground transport.`,
+        `Total Mission Time = Startup (3 min spool-up) + Flight Time (${hl.nm} @ cruise knots) + Approach (2 min pattern) + Ground / Car transfer.`,
         { after: 240 }
       )
     );

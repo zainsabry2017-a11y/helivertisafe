@@ -7,7 +7,7 @@
 
 html {
   /* Scales type with viewport — wide monitors get readable sizes without tiny fixed px */
-  font-size: clamp(17px, 0.55vw + 13px, 25px);
+  font-size: clamp(14px, 0.25vw + 12.5px, 17px);
 }
 
 html,

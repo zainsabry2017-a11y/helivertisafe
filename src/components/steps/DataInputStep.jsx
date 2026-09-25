@@ -476,7 +476,7 @@ export function DataInputStep() {
               </div>
               <div style={{ background: K.cy + "06", border: "1px solid " + K.cy + "15", borderRadius: 4, padding: 6, marginTop: 4 }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: K.cy, marginBottom: 4, letterSpacing: 0.5 }}>📍 POSITION (auto-linked: edit either pair)</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 4 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(95px, 1fr))", gap: 4 }}>
                   <div>{lbl("X (m)")}{inp("number", o.x || 0, v => dp({ type: "UO", payload: { zid: z.id, oid: o.id, fld: "x", val: v } }), { suffix: "m" })}</div>
                   <div>{lbl("Y (m)")}{inp("number", o.y || 0, v => dp({ type: "UO", payload: { zid: z.id, oid: o.id, fld: "y", val: v } }), { suffix: "m" })}</div>
                   <div>{lbl("Distance")}{inp("number", o.d, v => dp({ type: "UO", payload: { zid: z.id, oid: o.id, fld: "d", val: v } }), { suffix: "m" })}</div>
@@ -599,7 +599,7 @@ export function DataInputStep() {
             <span style={{ fontSize: 13, color: K.dm }}>Data Source:</span>
             {sel_(z.src?.terrain || "assumed", v => zf("src", "terrain", v), SRC_OPTIONS)}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 6, marginBottom: 8 }}>
             <div>{lbl("Slope * (%)")}<Tip text="Maximum ground slope across the zone as percentage. ICAO limit: 2% for PC1, 3% for PC2/3. Measured by survey or estimated from contour maps.">{inp("number", z.ter.slope, v => zf("ter", "slope", v), { suffix: "%" })}</Tip></div>
             <div>{lbl("Slope Dir (°)")}<Tip text="Direction of maximum slope, clockwise from North. E.g. 180° = slope falls toward south.">{inp("number", z.ter.slopeDir || 0, v => zf("ter", "slopeDir", v), { suffix: "°", min: 0, max: 360 })}</Tip></div>
             <div>{lbl("Side Slope (%)")}{inp("number", z.ter.side, v => zf("ter", "side", v), { suffix: "%" })}</div>
@@ -611,7 +611,7 @@ export function DataInputStep() {
               Slope {z.ter.slope}% at {z.ter.slopeDir}° → Long: {d.longitudinal}% | Trans: {d.transverse}% (relative to N, recalculated at scoring vs FATO heading) | Max FATO: {G.maxSlope}%
             </div>;
           })()}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 6, marginBottom: 8 }}>
             <div>{lbl("Elev Min")}{inp("number", z.ter.elevMin || 0, v => zf("ter", "elevMin", v), { suffix: "m" })}</div>
             <div>{lbl("Elev Max")}{inp("number", z.ter.elevMax || 0, v => zf("ter", "elevMax", v), { suffix: "m" })}</div>
             <div>{lbl("Elev Avg")}{inp("number", z.ter.elevAvg || 0, v => zf("ter", "elevAvg", v), { suffix: "m" })}</div>
@@ -681,115 +681,9 @@ export function DataInputStep() {
         {/* ACCESS TAB */}
         {dataTab === "access" && <>
         {/* INTERACTIVE ACCESS & DISTANCE CANVAS */}
-        <AccessDiagramCanvas z={z} dp={dp} zf={zf} K={K} D={D} />
-
-        {/* ACCESS */}
-        <div className="hvs-card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: K.bl }}>🛣 Access</span>
-            {zones.filter(zz => zz.on).length > 1 && btn("📋 Apply to all", () => dp({ type: "APPLY_ALL", payload: { section: "access", fromZid: z.id } }), "ghost")}
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <span style={{ fontSize: 13, color: K.dm }}>Data Source:</span>
-            {sel_(z.src?.access || "assumed", v => zf("src", "access", v), SRC_OPTIONS)}
-          </div>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
-            {chk(z.acc.road, v => zf("acc", "road", v), "Road")}
-            {chk(z.acc.emer, v => zf("acc", "emer", v), "Emergency")}
-            {chk(z.acc.util, v => zf("acc", "util", v), "Utilities")}
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 8 }}>
-            <div>{lbl("Road Dist")}{inp("number", z.acc.rd, v => zf("acc", "rd", v), { suffix: "m" })}</div>
-            <div>{lbl("Building Dist")}{inp("number", z.acc.bd, v => zf("acc", "bd", v), { suffix: "m" })}</div>
-          </div>
-          {/* ACCESS NODES */}
-          <div style={{ marginTop: 8, borderTop: "1px solid " + K.bd, paddingTop: 8 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: K.cy }}>Access Points ({(z.acc.nodes || []).length})</span>
-              {btn("+ Add", () => dp({ type: "ANODE", payload: { zid: z.id } }), "ghost")}
-            </div>
-            {(z.acc.nodes || []).map((n) => (
-              <div key={n.id} style={{ background: K.rs, borderRadius: 4, padding: 6, marginBottom: 3 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: 4, alignItems: "end" }}>
-                  <div>{lbl("Name")}{inp("text", n.nm, v => dp({ type: "UNODE", payload: { zid: z.id, nid: n.id, fld: "nm", val: v } }))}</div>
-                  <div>{lbl("Type")}{sel_(n.tp, v => dp({ type: "UNODE", payload: { zid: z.id, nid: n.id, fld: "tp", val: v } }), [{ v: "road", l: "Road" }, { v: "gate", l: "Gate" }, { v: "hospital", l: "Hospital" }, { v: "emergency", l: "Emergency" }])}</div>
-                  <div>{lbl("Priority")}{sel_(String(n.importance || 3), v => dp({ type: "UNODE", payload: { zid: z.id, nid: n.id, fld: "importance", val: parseInt(v) } }), ["1", "2", "3", "4", "5"].map(v => ({ v, l: v })))}</div>
-                  <button onClick={() => dp({ type: "DNODE", payload: { zid: z.id, nid: n.id } })} style={{ background: K.rd + "18", color: K.rd, border: "1px solid " + K.rd + "33", borderRadius: 3, fontSize: 14, padding: "4px 6px", cursor: "pointer", marginBottom: 12 }}>✕</button>
-                </div>
-                <div style={{ background: K.cy + "06", border: "1px solid " + K.cy + "15", borderRadius: 4, padding: 5, marginTop: 3 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: K.cy, marginBottom: 2 }}>📍 POSITION (auto-linked)</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 4 }}>
-                    <div>{lbl("X")}{inp("number", n.x || 0, v => dp({ type: "UNODE", payload: { zid: z.id, nid: n.id, fld: "x", val: v } }), { suffix: "m" })}</div>
-                    <div>{lbl("Y")}{inp("number", n.y || 0, v => dp({ type: "UNODE", payload: { zid: z.id, nid: n.id, fld: "y", val: v } }), { suffix: "m" })}</div>
-                    <div>{lbl("Dist")}{inp("number", n.dist, v => dp({ type: "UNODE", payload: { zid: z.id, nid: n.id, fld: "dist", val: v } }), { suffix: "m" })}</div>
-                    <div>{lbl("Bearing")}{inp("number", n.br || 0, v => dp({ type: "UNODE", payload: { zid: z.id, nid: n.id, fld: "br", val: v } }), { suffix: "°" })}</div>
-                  </div>
-                </div>
-              </div>
-            ))}
-            {!(z.acc.nodes || []).length && <div style={{ fontSize: 13, color: K.mu, textAlign: "center", padding: 4 }}>Add specific access points (gates, hospital entries, etc.)</div>}
-          </div>
-        </div>
-        {/* RESPONSE TIME DESTINATIONS */}
-        <div className="hvs-card" style={{ padding: 16, marginTop: 8 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: K.pu }}>🕐 Response Time Destinations ({(site.destinations || []).length})</span>
-            {btn("+ Add Destination", () => dp({ type: "ADEST" }), "ghost")}
-          </div>
-          <div style={{ fontSize: 13, color: K.dm, marginBottom: 8, background: K.pn, padding: "4px 8px", borderRadius: 4 }}>
-            Define target locations (hospital, HQ, base) — the system calculates flight time from helipad. Use for EMS response time compliance or client requirements.
-          </div>
-          {(site.destinations || []).map((d, i) => {
-            const rt = calcResponseTime(d, site.lat, site.lng);
-            return (
-              <div key={d.id} style={{ background: K.rs, borderRadius: 6, padding: 10, marginBottom: 6 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700 }}>#{i + 1} {d.nm}</span>
-                  <button onClick={() => dp({ type: "DDEST", payload: d.id })} style={{ background: K.rd + "18", color: K.rd, border: "1px solid " + K.rd + "33", borderRadius: 3, fontSize: 14, padding: "1px 6px", cursor: "pointer" }}>✕</button>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 4, marginBottom: 4 }}>
-                  <div>{lbl("Name *")}{inp("text", d.nm, v => dp({ type: "UDEST", payload: { did: d.id, fld: "nm", val: v } }))}</div>
-                  <div>{lbl("Type")}{sel_(d.tp, v => dp({ type: "UDEST", payload: { did: d.id, fld: "tp", val: v } }), [{ v: "hospital", l: "Hospital" }, { v: "hq", l: "HQ / Base" }, { v: "airport", l: "Airport" }, { v: "military", l: "Military" }, { v: "offshore", l: "Offshore" }, { v: "city", l: "City Center" }, { v: "custom", l: "Custom" }])}</div>
-                  <div>{lbl("Required")}{chk(d.required, v => dp({ type: "UDEST", payload: { did: d.id, fld: "required", val: v } }), "Must meet")}</div>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 4, marginBottom: 4 }}>
-                  <div>{lbl("Lat")}{inp("number", d.lat, v => dp({ type: "UDEST", payload: { did: d.id, fld: "lat", val: v } }), { suffix: "°", step: 0.001 })}</div>
-                  <div>{lbl("Lng")}{inp("number", d.lng, v => dp({ type: "UDEST", payload: { did: d.id, fld: "lng", val: v } }), { suffix: "°", step: 0.001 })}</div>
-                  <div>{lbl("OR Distance")}{inp("number", d.distKm, v => dp({ type: "UDEST", payload: { did: d.id, fld: "distKm", val: v } }), { suffix: "km" })}</div>
-                  <div>{lbl("Max Time")}{inp("number", d.maxMinutes, v => dp({ type: "UDEST", payload: { did: d.id, fld: "maxMinutes", val: v } }), { suffix: "min" })}</div>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, marginBottom: 4 }}>
-                  <div>{lbl("Cruise Speed")}{inp("number", d.cruiseKt, v => dp({ type: "UDEST", payload: { did: d.id, fld: "cruiseKt", val: v } }), { suffix: "kt" })}</div>
-                  <div>{lbl("Ground Time")}{inp("number", d.groundMin, v => dp({ type: "UDEST", payload: { did: d.id, fld: "groundMin", val: v } }), { suffix: "min" })}</div>
-                </div>
-                {/* RESULT */}
-                {rt && (
-                  <div style={{ background: rt.meetsReq ? K.gn + "10" : K.rd + "10", border: "1px solid " + (rt.meetsReq ? K.gn : K.rd) + "30", borderRadius: 4, padding: 8, marginTop: 4 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: K.dm, letterSpacing: 1 }}>TOTAL RESPONSE TIME</div>
-                        <div style={{ fontSize: 20, fontWeight: 800, color: rt.meetsReq ? K.gn : K.rd }}>{rt.totalMin} min</div>
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        {d.maxMinutes > 0 && <Tag color={rt.meetsReq ? K.gn : K.rd}>{rt.meetsReq ? "MEETS" : "EXCEEDS"} {d.maxMinutes}min</Tag>}
-                      </div>
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 4, marginTop: 6, fontSize: 13 }}>
-                      <div style={{ textAlign: "center" }}><div style={{ color: K.dm }}>Distance</div><div style={{ fontWeight: 700 }}>{rt.distKm} km</div></div>
-                      <div style={{ textAlign: "center" }}><div style={{ color: K.dm }}>Startup</div><div style={{ fontWeight: 700 }}>{rt.startupMin} min</div></div>
-                      <div style={{ textAlign: "center" }}><div style={{ color: K.dm }}>Flight</div><div style={{ fontWeight: 700, color: K.cy }}>{rt.flightMin} min</div></div>
-                      <div style={{ textAlign: "center" }}><div style={{ color: K.dm }}>Ground</div><div style={{ fontWeight: 700 }}>{rt.groundMin} min</div></div>
-                    </div>
-                    <div style={{ fontSize: 14, color: K.mu, marginTop: 4 }}>Breakdown: {rt.startupMin}min startup + {rt.flightMin}min flight ({rt.speedKmh} km/h) + {rt.approachMin}min approach + {rt.groundMin}min ground</div>
-                  </div>
-                )}
-                {!rt && <div style={{ fontSize: 13, color: K.am, marginTop: 4 }}>Enter coordinates or distance to calculate response time</div>}
-              </div>
-            );
-          })}
-          {!(site.destinations || []).length && <div style={{ fontSize: 13, color: K.mu, textAlign: "center", padding: 8 }}>No destinations defined. Add hospital, HQ, or other response targets.</div>}
-        </div>
+        <AccessDiagramCanvas z={z} dp={dp} zf={zf} K={K} D={D} zones={zones} SRC_OPTIONS={SRC_OPTIONS} sel_={sel_} site={site} />
         </>}
+
 
         {/* SENSITIVITY TAB */}
         {dataTab === "sens" && <>
@@ -815,7 +709,7 @@ export function DataInputStep() {
               </div>
               <div style={{ background: K.cy + "06", border: "1px solid " + K.cy + "15", borderRadius: 4, padding: 5, marginTop: 4 }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: K.cy, marginBottom: 3 }}>📍 POSITION (auto-linked)</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 4 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(95px, 1fr))", gap: 4 }}>
                   <div>{lbl("X (m)")}{inp("number", s.x || 0, v => dp({ type: "USENS", payload: { zid: z.id, sid: s.id, fld: "x", val: v } }), { suffix: "m" })}</div>
                   <div>{lbl("Y (m)")}{inp("number", s.y || 0, v => dp({ type: "USENS", payload: { zid: z.id, sid: s.id, fld: "y", val: v } }), { suffix: "m" })}</div>
                   <div>{lbl("Distance")}{inp("number", s.dist, v => dp({ type: "USENS", payload: { zid: z.id, sid: s.id, fld: "dist", val: v } }), { suffix: "m" })}</div>

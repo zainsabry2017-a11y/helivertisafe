@@ -1093,34 +1093,44 @@ export function ResultsStep() {
                 {/* RESPONSE TIMES */}
                 {(site.destinations || []).length > 0 && rSec("3. Response Time Analysis", (
                   <div>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 8 }}>
-                      <thead>
-                        <tr style={{ background: "#f8fafc" }}>
-                          {["Destination", "Type", "Distance", "Flight", "Total", "Requirement", "Status"].map(h => (
-                            <th key={h} style={{ padding: "5px 6px", textAlign: "left", borderBottom: "2px solid #e5e7eb", fontWeight: 700, color: "#374151" }}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(site.destinations || []).map((d, i) => {
-                          const rt = calcResponseTime(d, site.lat, site.lng);
-                          return (
-                            <tr key={i} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                              <td style={{ padding: "4px 6px", fontWeight: 600 }}>{d.nm}</td>
-                              <td style={{ padding: "4px 6px" }}>{d.tp}</td>
-                              <td style={{ padding: "4px 6px" }}>{rt ? rt.distKm + " km" : "—"}</td>
-                              <td style={{ padding: "4px 6px" }}>{rt ? rt.flightMin + " min" : "—"}</td>
-                              <td style={{ padding: "4px 6px", fontWeight: 700, color: rt && !rt.meetsReq ? "#991b1b" : "#166534" }}>{rt ? rt.totalMin + " min" : "—"}</td>
-                              <td style={{ padding: "4px 6px" }}>{d.maxMinutes > 0 ? "≤" + d.maxMinutes + " min" : "—"}</td>
-                              <td style={{ padding: "4px 6px" }}>
-                                {rt && d.maxMinutes > 0 ? <span style={{ padding: "1px 6px", borderRadius: 3, fontSize: 13, fontWeight: 700, color: rt.meetsReq ? "#166534" : "#991b1b", background: rt.meetsReq ? "#bbf7d0" : "#fecaca" }}>{rt.meetsReq ? "MEETS" : "EXCEEDS"}</span> : "—"}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                    <div style={{ fontSize: 13, color: "#9ca3af" }}>Response time = startup (3min) + flight time ({hl.nm}) + approach (2min) + ground transport. Speed based on cruise at configured knots.</div>
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 8 }}>
+                        <thead>
+                          <tr style={{ background: "#f8fafc" }}>
+                            {["Destination", "Type", "Distance", "Flight Speed", "Flight Time", "Ground / Car", "Total Time", "Target Limit", "Compliance"].map(h => (
+                              <th key={h} style={{ padding: "6px 8px", textAlign: "left", borderBottom: "2px solid #e5e7eb", fontWeight: 700, color: "#374151", whiteSpace: "nowrap" }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(site.destinations || []).map((d, i) => {
+                            const rt = calcResponseTime(d, site.lat, site.lng);
+                            return (
+                              <tr key={i} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                                <td style={{ padding: "6px 8px", fontWeight: 600 }}>{d.nm}</td>
+                                <td style={{ padding: "6px 8px" }}>{d.tp}</td>
+                                <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{rt ? rt.distKm + " km" : "—"}</td>
+                                <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{rt ? rt.cruiseKt + " kt" : (d.cruiseKt || 120) + " kt"}</td>
+                                <td style={{ padding: "6px 8px", color: "#0284c7", fontWeight: 600, whiteSpace: "nowrap" }}>{rt ? rt.flightMin + " min" : "—"}</td>
+                                <td style={{ padding: "6px 8px", color: "#ea580c", whiteSpace: "nowrap" }}>{rt ? (rt.groundMin > 0 ? rt.groundMin + " min" : "0 min") : "—"}</td>
+                                <td style={{ padding: "6px 8px", fontWeight: 700, color: rt && !rt.meetsReq ? "#991b1b" : "#166534", whiteSpace: "nowrap" }}>{rt ? rt.totalMin + " min" : "—"}</td>
+                                <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{d.maxMinutes > 0 ? "≤ " + d.maxMinutes + " min" : "—"}</td>
+                                <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
+                                  {rt && d.maxMinutes > 0 ? (
+                                    <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700, color: rt.meetsReq ? "#166534" : "#991b1b", background: rt.meetsReq ? "#bbf7d0" : "#fecaca" }}>
+                                      {rt.meetsReq ? "MEETS" : "EXCEEDS"}
+                                    </span>
+                                  ) : "—"}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+                      Total Mission Time = Startup (3 min spool-up) + Flight Time (@ configured cruise speed) + Approach (2 min pattern) + Ground / Car transfer.
+                    </div>
                   </div>
                 ))}
 

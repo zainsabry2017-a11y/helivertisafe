@@ -148,22 +148,22 @@ export default function App() {
 
   const zf = (sec, fld, val) => dp({ type: "ZF", payload: { zid: sel, sec, fld, val } });
   const inp = (type, value, onChange, extra = {}) => (
-    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0, width: "100%" }}>
       <input type={type} value={value} onChange={e => onChange(type === "number" ? (e.target.value === "" ? 0 : parseFloat(e.target.value)) : e.target.value)} min={extra.min} max={extra.max} step={extra.step} placeholder={extra.ph}
-        style={{ flex: 1, background: "rgba(21,34,54,0.6)", border: "1px solid " + K.bd, borderRadius: 6, padding: "0.65rem 0.85rem", color: K.tx, fontSize: "1rem", outline: "none", transition: "border-color 0.2s, box-shadow 0.2s", backdropFilter: "blur(4px)" }}
+        style={{ flex: 1, minWidth: 0, width: "100%", boxSizing: "border-box", background: "rgba(21,34,54,0.6)", border: "1px solid " + K.bd, borderRadius: 6, padding: "0.45rem 0.6rem", color: K.tx, fontSize: "0.9375rem", outline: "none", transition: "border-color 0.2s, box-shadow 0.2s", backdropFilter: "blur(4px)" }}
         onFocus={e => { e.target.style.borderColor = K.cy; e.target.style.boxShadow = "0 0 0 2px " + K.cy + "20"; }}
         onBlur={e => { e.target.style.borderColor = K.bd; e.target.style.boxShadow = "none"; }} />
-      {extra.suffix && <span style={{ fontSize: "0.875rem", color: K.cy, fontWeight: 600, minWidth: 16 }}>{extra.suffix}</span>}
+      {extra.suffix && <span style={{ fontSize: "0.8125rem", color: K.cy, fontWeight: 600, flexShrink: 0 }}>{extra.suffix}</span>}
     </div>
   );
   const sel_ = (value, onChange, options) => (
-    <select value={value} onChange={e => onChange(e.target.value)} style={{ width: "100%", background: "rgba(21,34,54,0.6)", border: "1px solid " + K.bd, borderRadius: 6, padding: "0.65rem 0.85rem", color: K.tx, fontSize: "1rem", outline: "none", cursor: "pointer", backdropFilter: "blur(4px)" }}>
+    <select value={value} onChange={e => onChange(e.target.value)} style={{ width: "100%", minWidth: 0, boxSizing: "border-box", background: "rgba(21,34,54,0.6)", border: "1px solid " + K.bd, borderRadius: 6, padding: "0.45rem 0.6rem", color: K.tx, fontSize: "0.9375rem", outline: "none", cursor: "pointer", backdropFilter: "blur(4px)" }}>
       {options.map(o => <option key={typeof o === "string" ? o : o.v} value={typeof o === "string" ? o : o.v}>{typeof o === "string" ? o : o.l}</option>)}
     </select>
   );
   const lbl = (text) => {
     const isMandatory = text.includes("*");
-    return <div style={{ fontSize: "0.875rem", fontWeight: 700, color: K.dm, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 4 }}>{text.replace(" *", "")}{isMandatory && <span style={{ color: K.rd, marginLeft: 2 }}>*</span>}</div>;
+    return <div style={{ fontSize: "0.78rem", fontWeight: 700, color: K.dm, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={text}>{text.replace(" *", "")}{isMandatory && <span style={{ color: K.rd, marginLeft: 2 }}>*</span>}</div>;
   };
   const btn = (content, onClick, variant = "primary", disabled = false, a11y = {}) => {
     const vs = {
