@@ -8,6 +8,7 @@ import { calcConfidence } from "../../engine/confidence.js";
 import { genSuggestions } from "../../engine/suggestions.js";
 import { calcResponseTime } from "../../engine/responseTime.js";
 import { optimizePadCenter } from "../../engine/padOptimizer.js";
+import { calculateDownwash } from "../../engine/downwash.js";
 import { ErrorBoundary } from "../ui/ErrorBoundary.jsx";
 import { WindRose } from "../charts/WindRose.jsx";
 import { OLSChart } from "../charts/OLSChart.jsx";
@@ -564,6 +565,98 @@ export function ResultsStep() {
                 )}
               </ErrorBoundary>
             </div>
+
+            {/* ROTOR DOWNWASH IMPACT ASSESSMENT CARD */}
+            {(() => {
+              const hl = getHeli(proj);
+              const dw = calculateDownwash(hl, site?.elev || 0);
+              const zObs = selZ?.obs || [];
+              const affectedObs = zObs.filter(o => (o.d || 999) <= dw.hazardRadii.r30Kt);
+
+              return (
+                <div className="hvs-card" style={{ padding: "18px 22px", marginTop: 16 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 22 }}>💨</span>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: K.tx, letterSpacing: -0.2 }}>
+                          ROTOR DOWNWASH & GROUND OUTWASH ASSESSMENT
+                        </div>
+                        <div style={{ fontSize: 11, color: K.mu, marginTop: 2 }}>
+                          Momentum Theory & IGE Ground Outwash Profile (FAA AC 150/5390 · UK CAA CAP 1264)
+                        </div>
+                      </div>
+                    </div>
+                    <Tag color={dw.severityColor}>{dw.severityLabel.toUpperCase()}</Tag>
+                  </div>
+
+                  {/* Physics & Telemetry Grid */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginBottom: 14 }}>
+                    <div style={{ background: "rgba(15,23,42,0.6)", padding: "10px 12px", borderRadius: 8, border: "1px solid " + K.bd }}>
+                      <div style={{ fontSize: 10, color: K.mu, fontWeight: 700 }}>DESIGN AIRCRAFT</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: K.tx, marginTop: 4 }}>{hl.nm}</div>
+                      <div style={{ fontSize: 10, color: K.dm, marginTop: 2 }}>MTOW {(hl.mtow / 1000).toFixed(1)}t · Ø {hl.rtr || hl.D}m</div>
+                    </div>
+                    <div style={{ background: "rgba(15,23,42,0.6)", padding: "10px 12px", borderRadius: 8, border: "1px solid " + K.bd }}>
+                      <div style={{ fontSize: 10, color: K.mu, fontWeight: 700 }}>DISC LOADING</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: K.cy, marginTop: 4 }}>{dw.discLoadingKgM2.toFixed(1)} <span style={{ fontSize: 10 }}>kg/m²</span></div>
+                      <div style={{ fontSize: 10, color: K.dm, marginTop: 2 }}>Area {dw.discAreaM2.toFixed(0)} m²</div>
+                    </div>
+                    <div style={{ background: "rgba(15,23,42,0.6)", padding: "10px 12px", borderRadius: 8, border: "1px solid " + K.bd }}>
+                      <div style={{ fontSize: 10, color: K.mu, fontWeight: 700 }}>HOVER INDUCED (OGE)</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: K.tx, marginTop: 4 }}>{dw.viKt.toFixed(0)} kt</div>
+                      <div style={{ fontSize: 10, color: K.dm, marginTop: 2 }}>{dw.viMs.toFixed(1)} m/s at disc</div>
+                    </div>
+                    <div style={{ background: "rgba(15,23,42,0.6)", padding: "10px 12px", borderRadius: 8, border: "1px solid " + K.bd }}>
+                      <div style={{ fontSize: 10, color: K.mu, fontWeight: 700 }}>PEAK GROUND OUTWASH</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: dw.severityColor, marginTop: 4 }}>{dw.vMaxKt.toFixed(0)} kt</div>
+                      <div style={{ fontSize: 10, color: K.dm, marginTop: 2 }}>{dw.vMaxMs.toFixed(1)} m/s @ {dw.peakRadiusM.toFixed(1)}m</div>
+                    </div>
+                    <div style={{ background: "rgba(15,23,42,0.6)", padding: "10px 12px", borderRadius: 8, border: "1px solid " + K.bd }}>
+                      <div style={{ fontSize: 10, color: K.mu, fontWeight: 700 }}>PERSONNEL 30kt LIMIT</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: "#fbbf24", marginTop: 4 }}>{dw.hazardRadii.r30Kt} m</div>
+                      <div style={{ fontSize: 10, color: K.dm, marginTop: 2 }}>Safe personnel perimeter</div>
+                    </div>
+                  </div>
+
+                  {/* Hazard Zone Distance Thresholds */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+                    <div style={{ padding: "8px 12px", borderRadius: 6, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)" }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: "#f87171" }}>🔴 Severe Zone (&gt;60 kt / 31 m/s): 0 – {dw.hazardRadii.r60Kt}m</div>
+                      <div style={{ fontSize: 10, color: K.dm, marginTop: 2 }}>Extreme debris & structural damage risk. Personnel strictly prohibited.</div>
+                    </div>
+                    <div style={{ padding: "8px 12px", borderRadius: 6, background: "rgba(249,115,22,0.08)", border: "1px solid rgba(249,115,22,0.25)" }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: "#fb923c" }}>🟠 High Wind Zone (&gt;45 kt / 23 m/s): {dw.hazardRadii.r60Kt} – {dw.hazardRadii.r45Kt}m</div>
+                      <div style={{ fontSize: 10, color: K.dm, marginTop: 2 }}>Risk of personnel blow-over. Loose objects become high-velocity projectiles.</div>
+                    </div>
+                    <div style={{ padding: "8px 12px", borderRadius: 6, background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.25)" }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: "#fcd34d" }}>🟡 Caution Zone (30–45 kt / 15–23 m/s): {dw.hazardRadii.r45Kt} – {dw.hazardRadii.r30Kt}m</div>
+                      <div style={{ fontSize: 10, color: K.dm, marginTop: 2 }}>Passenger walking difficulty. Eye protection recommended; tie downs required.</div>
+                    </div>
+                    <div style={{ padding: "8px 12px", borderRadius: 6, background: "rgba(6,182,212,0.08)", border: "1px solid rgba(6,182,212,0.25)" }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: "#67e8f9" }}>🟢 Operational Boundary (&lt;15 kt): Beyond {dw.hazardRadii.r15Kt}m</div>
+                      <div style={{ fontSize: 10, color: K.dm, marginTop: 2 }}>Safe general pedestrian area, parking lots, and passenger holding lounges.</div>
+                    </div>
+                  </div>
+
+                  {/* Impact on nearby structures/obstacles */}
+                  {affectedObs.length > 0 && (
+                    <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 6, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)" }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#f87171" }}>
+                        ⚠️ {affectedObs.length} Structure(s) inside the &gt;30 kt Downwash Buffer:
+                      </div>
+                      <div style={{ fontSize: 10, color: K.tx, marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                        {affectedObs.map(o => (
+                          <span key={o.nm || o.id}>
+                            <strong>{o.nm || "Obstacle"}</strong> ({o.d}m away) — exp. velocity: <strong>{dw.getVelocityAtDistance(o.d).kt.toFixed(0)} kt</strong>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </>}
 
           {tab === "comply" && selZ?.sc && (() => {

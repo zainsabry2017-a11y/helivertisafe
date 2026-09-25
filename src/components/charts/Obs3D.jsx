@@ -4,13 +4,11 @@ import { K } from "../../utils/theme.js";
 import { DEG, clamp } from "../../utils/coords.js";
 import { calcGeom, getHeli } from "../../data/models.js";
 import { zonePadCenter } from "../../engine/geometry.js";
+import { calculateDownwash } from "../../engine/downwash.js";
 
 /**
- * High-Performance, Precision 3D Helipad & OLS Limitation Surface Visualizer.
- * Fully compliant with ICAO Annex 14 Vol II & Saudi GACAR Part 138 geometry.
- *
- * Approach surface correctly originates at the outer boundary of the Safety Area
- * (per ICAO Annex 14 Vol II, Section 4.2.14) with true lateral splay and 2-stage gradient.
+ * High-Performance, Precision 3D Helipad, OLS Limitation Surface & Rotor Downwash Visualizer.
+ * Fully compliant with ICAO Annex 14 Vol II, Saudi GACAR Part 138, and FAA AC 150/5390.
  */
 export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnapshotReady }, ref) {
   const mountRef = useRef(null);
@@ -40,6 +38,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
   const [showApproach, setShowApproach] = useState(true);
   const [showTransitional, setShowTransitional] = useState(true);
   const [showInnerHoriz, setShowInnerHoriz] = useState(false);
+  const [showDownwash, setShowDownwash] = useState(true);
   const [showAircraft, setShowAircraft] = useState(true);
   const [showRings, setShowRings] = useState(true);
   const [showFlightPath, setShowFlightPath] = useState(true);
@@ -54,6 +53,8 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
   const approachGroupRef = useRef(null);
   const transitionalGroupRef = useRef(null);
   const flightPathGroupRef = useRef(null);
+  const downwashGroupRef = useRef(null);
+  const downwashParticlesRef = useRef(null);
   const ihMeshRef = useRef(null);
   const aircraftGroupRef = useRef(null);
   const rotorRef = useRef(null);
@@ -66,6 +67,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
   const G = useMemo(() => calcGeom(proj), [proj]);
   const heli = useMemo(() => getHeli(proj), [proj]);
   const cent = useMemo(() => (zone ? zonePadCenter(zone) : { x: 0, y: 0 }), [zone]);
+  const downwash = useMemo(() => calculateDownwash(heli, proj?.elev || 0), [heli, proj?.elev]);
 
   // Sync approach heading when zone primary wind changes
   useEffect(() => {
@@ -105,7 +107,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       dr.rotY = 0;
       dr.zoom = 1.15;
     } else if (preset === "glideslope") {
-      // Look straight down the approach track from the outer approach end towards pad
       const rad = (approachHeading * Math.PI) / 180;
       dr.rotX = 0.14; // ~8 degree glideslope viewpoint
       dr.rotY = rad + Math.PI;
@@ -118,7 +119,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     }
   };
 
-  // Helper: Create high-contrast TLOF canvas texture (Pad markings: Aiming Point "H", D-value, MTOW, boundary)
+  // Helper: Create high-contrast TLOF canvas texture
   const createPadTexture = (fatoSize, tlofSize, dValue, mtowKg, isVertiport) => {
     const canvas = document.createElement("canvas");
     canvas.width = 1024;
@@ -126,11 +127,9 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
 
-    // Dark tarmac / concrete background
     ctx.fillStyle = "#1e293b";
     ctx.fillRect(0, 0, 1024, 1024);
 
-    // Concrete grain pattern
     ctx.fillStyle = "#273549";
     for (let i = 0; i < 400; i++) {
       const rx = Math.random() * 1024;
@@ -138,28 +137,23 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       ctx.fillRect(rx, ry, Math.random() * 4 + 1, Math.random() * 4 + 1);
     }
 
-    // Outer FATO dashed border
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 14;
     ctx.setLineDash([48, 36]);
     ctx.strokeRect(32, 32, 960, 960);
     ctx.setLineDash([]);
 
-    // TLOF inner area ratio
     const tlofRatio = Math.min(0.85, Math.max(0.45, tlofSize / fatoSize));
     const padW = 960 * tlofRatio;
     const padOffset = (1024 - padW) / 2;
 
-    // TLOF solid border with dark contrast safety border
     ctx.fillStyle = "#0f172a";
     ctx.fillRect(padOffset, padOffset, padW, padW);
 
-    // TLOF White border line
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 18;
     ctx.strokeRect(padOffset + 10, padOffset + 10, padW - 20, padW - 20);
 
-    // Touchdown / Aiming Circle
     const cx = 512, cy = 512;
     const circleR = padW * 0.28;
     ctx.beginPath();
@@ -168,19 +162,15 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     ctx.lineWidth = 16;
     ctx.stroke();
 
-    // Aiming symbol: "H" or "V" (for eVTOL Vertiport)
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.font = `900 ${Math.floor(padW * 0.32)}px "Segoe UI", Arial, sans-serif`;
     ctx.fillText(isVertiport ? "V" : "H", cx, cy);
 
-    // Operational Markings: D-Value & Maximum Allowable Mass
     ctx.font = `700 ${Math.floor(padW * 0.065)}px "Segoe UI", Arial, sans-serif`;
     ctx.fillStyle = "#38bdf8";
-    // Top D-Value
     ctx.fillText(`D = ${dValue.toFixed(1)}m`, cx, padOffset + padW * 0.12);
-    // Bottom MTOW
     const mtowT = (mtowKg / 1000).toFixed(1);
     ctx.fillStyle = "#fbbf24";
     ctx.fillText(`MAX ${mtowT}t`, cx, padOffset + padW * 0.88);
@@ -195,7 +185,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     const group = new THREE.Group();
     const scale = dVal / 16.0;
 
-    // Fuselage material
     const bodyMat = new THREE.MeshStandardMaterial({
       color: isVertiport ? 0x06b6d4 : 0x2563eb,
       metalness: 0.75,
@@ -214,7 +203,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     });
     const darkMetal = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.8, roughness: 0.3 });
 
-    // Fuselage cabin
     const cabinGeo = new THREE.ConeGeometry(1.6 * scale, 6.5 * scale, 12);
     cabinGeo.rotateZ(Math.PI / 2);
     cabinGeo.scale(1, 0.75, 0.85);
@@ -223,14 +211,12 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     cabin.castShadow = true;
     group.add(cabin);
 
-    // Windshield cockpit canopy
     const noseGeo = new THREE.SphereGeometry(1.25 * scale, 16, 12);
     noseGeo.scale(1.2, 0.7, 0.75);
     const nose = new THREE.Mesh(noseGeo, glassMat);
     nose.position.set(-1.8 * scale, 1.8 * scale, 0);
     group.add(nose);
 
-    // Tail boom
     const boomGeo = new THREE.CylinderGeometry(0.32 * scale, 0.55 * scale, 7.5 * scale, 10);
     boomGeo.rotateZ(Math.PI / 2);
     const boom = new THREE.Mesh(boomGeo, bodyMat);
@@ -238,19 +224,16 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     boom.castShadow = true;
     group.add(boom);
 
-    // Vertical fin / tail stabilizer
     const finGeo = new THREE.BoxGeometry(1.2 * scale, 1.8 * scale, 0.15 * scale);
     const fin = new THREE.Mesh(finGeo, bodyMat);
     fin.position.set(8.8 * scale, 2.7 * scale, 0);
     group.add(fin);
 
-    // Horizontal stabilizer
     const hStabGeo = new THREE.BoxGeometry(0.6 * scale, 0.1 * scale, 2.2 * scale);
     const hStab = new THREE.Mesh(hStabGeo, bodyMat);
     hStab.position.set(7.5 * scale, 2.1 * scale, 0);
     group.add(hStab);
 
-    // Landing skids / Gear
     const skidGeo = new THREE.CylinderGeometry(0.08 * scale, 0.08 * scale, 7.0 * scale, 8);
     skidGeo.rotateZ(Math.PI / 2);
     const leftSkid = new THREE.Mesh(skidGeo, darkMetal);
@@ -259,7 +242,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     rightSkid.position.set(0, 0.3 * scale, -1.2 * scale);
     group.add(leftSkid, rightSkid);
 
-    // Skid struts
     const strutGeo = new THREE.CylinderGeometry(0.06 * scale, 0.06 * scale, 1.4 * scale, 6);
     const s1 = new THREE.Mesh(strutGeo, darkMetal);
     s1.position.set(-1.5 * scale, 1.0 * scale, 0.65 * scale);
@@ -275,13 +257,11 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     s4.rotation.x = -0.4;
     group.add(s1, s2, s3, s4);
 
-    // Main rotor mast & hub
     const mastGeo = new THREE.CylinderGeometry(0.18 * scale, 0.18 * scale, 0.9 * scale, 10);
     const mast = new THREE.Mesh(mastGeo, darkMetal);
     mast.position.set(0.2 * scale, 3.2 * scale, 0);
     group.add(mast);
 
-    // Main rotor blades assembly
     const rotorGroup = new THREE.Group();
     rotorGroup.position.set(0.2 * scale, 3.7 * scale, 0);
     const rRadius = (heliMeta?.rtr || dVal * 0.9) / 2;
@@ -303,7 +283,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     }
     group.add(rotorGroup);
 
-    // Tail rotor
     const tailRotorGroup = new THREE.Group();
     tailRotorGroup.position.set(9.0 * scale, 2.7 * scale, 0.22 * scale);
     const tailBladeGeo = new THREE.BoxGeometry(0.12 * scale, 1.6 * scale, 0.04 * scale);
@@ -313,7 +292,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     tailRotorGroup.add(tb1, tb2);
     group.add(tailRotorGroup);
 
-    // Navigation Lights
     const navGeo = new THREE.SphereGeometry(0.12 * scale, 8, 8);
     const redLight = new THREE.Mesh(navGeo, new THREE.MeshBasicMaterial({ color: 0xef4444 }));
     redLight.position.set(0, 1.8 * scale, 1.4 * scale);
@@ -323,7 +301,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     tailBeacon.position.set(9.2 * scale, 3.2 * scale, 0);
     group.add(redLight, greenLight, tailBeacon);
 
-    // Flashing Anti-Collision Beacon Light
     const beacon = new THREE.PointLight(0xff2222, 1.5, 20 * scale);
     beacon.position.set(0.2 * scale, 3.9 * scale, 0);
     group.add(beacon);
@@ -362,28 +339,21 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     return group;
   };
 
-  /**
-   * Helper: Create ICAO Annex 14 Vol II Approach/Take-off Climb Surface
-   * CRITICAL COMPLIANCE FIX:
-   * Per Section 4.2.14, the inner edge is located at the OUTER BOUNDARY OF THE SAFETY AREA
-   * (at distance saHalf = geom.tot / 2 along the approach axis from FATO center).
-   */
+  // Helper: Create ICAO Annex 14 Vol II Approach/Take-off Climb Surface
   const buildApproachSurfaces = (geom, maxDist) => {
     const group = new THREE.Group();
     const saHalf = geom.tot / 2; // Outer boundary of safety area
-    const innerW = saHalf;       // Inner edge width matches safety area width
+    const innerW = saHalf;
     const appLen = Math.min(geom.appLen, maxDist * 1.15);
     const splay = geom.splay || 0.1;
     const outerW = innerW + appLen * splay;
 
-    // 2-Stage slope profile (ICAO PC-1 / PC-2 / PC-3)
     const innerLen = Math.min(geom.innerLenM || appLen * 0.35, appLen);
     const innerH = innerLen * geom.innerG;
     const outerLen = appLen - innerLen;
     const totalH = innerH + outerLen * geom.outerG;
     const midW = innerW + innerLen * splay;
-
-    const baseY = 0.22; // Pad and safety area elevation
+    const baseY = 0.22;
 
     const appMat = new THREE.MeshStandardMaterial({
       color: 0xf59e0b,
@@ -398,11 +368,8 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     const clLineMat = new THREE.LineDashedMaterial({ color: 0xfbbf24, dashSize: 4, gapSize: 2 });
     const threshMat = new THREE.LineBasicMaterial({ color: 0x10b981, linewidth: 3 });
 
-    // Build one direction (Z negative = Primary Approach), then reciprocal (Z positive = Departure)
     const createFan = (dirSign) => {
       const fanGroup = new THREE.Group();
-
-      // Z coordinates: Starting AT outer boundary of Safety Area, moving away from pad
       const z0 = dirSign * saHalf;
       const z1 = dirSign * (saHalf + innerLen);
       const z2 = dirSign * (saHalf + appLen);
@@ -411,7 +378,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       const y1 = baseY + innerH;
       const y2 = baseY + totalH;
 
-      // Stage 1 & Stage 2 Quads
       const v0 = [-innerW, y0, z0];
       const v1 = [innerW, y0, z0];
       const v2 = [midW, y1, z1];
@@ -420,8 +386,8 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       const v5 = [-outerW, y2, z2];
 
       const vertices = new Float32Array([
-        ...v0, ...v1, ...v2, ...v0, ...v2, ...v3, // Stage 1
-        ...v3, ...v2, ...v4, ...v3, ...v4, ...v5, // Stage 2
+        ...v0, ...v1, ...v2, ...v0, ...v2, ...v3,
+        ...v3, ...v2, ...v4, ...v3, ...v4, ...v5,
       ]);
       const fanGeom = new THREE.BufferGeometry();
       fanGeom.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
@@ -430,12 +396,11 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       const mesh = new THREE.Mesh(fanGeom, appMat);
       fanGroup.add(mesh);
 
-      // Approach Inner Edge Threshold Marker Line (Green aviation threshold bar)
+      // Green threshold bar
       const threshPts = [new THREE.Vector3(-innerW, y0 + 0.05, z0), new THREE.Vector3(innerW, y0 + 0.05, z0)];
       const threshLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(threshPts), threshMat);
       fanGroup.add(threshLine);
 
-      // Threshold Inset Green LED Markers along the inner edge
       const threshLightGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.15, 8);
       const threshLightMat = new THREE.MeshBasicMaterial({ color: 0x10b981 });
       for (let k = -innerW + 1; k <= innerW; k += Math.max(2.5, innerW / 4)) {
@@ -444,7 +409,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
         fanGroup.add(tl);
       }
 
-      // Outer wireframe edge lines
       const edgePoints = [
         new THREE.Vector3(v0[0], v0[1], v0[2]),
         new THREE.Vector3(v3[0], v3[1], v3[2]),
@@ -457,7 +421,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       const edgeLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(edgePoints), lineMat);
       fanGroup.add(edgeLine);
 
-      // Centerline glideslope trace starting from Threshold
       const clPoints = [
         new THREE.Vector3(0, y0, z0),
         new THREE.Vector3(0, y1, z1),
@@ -468,7 +431,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       clLine.computeLineDistances();
       fanGroup.add(clLine);
 
-      // Distance crossbars every 50m along approach
       for (let dist = 50; dist < appLen; dist += 50) {
         const curW = innerW + dist * splay;
         const curH = dist <= innerLen ? dist * geom.innerG : innerH + (dist - innerLen) * geom.outerG;
@@ -487,20 +449,16 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       return fanGroup;
     };
 
-    group.add(createFan(-1)); // Primary approach fan
-    group.add(createFan(1));  // Reciprocal departure fan
+    group.add(createFan(-1));
+    group.add(createFan(1));
     return { group, appLen, totalH, saHalf };
   };
 
-  /**
-   * Helper: Create ICAO Transitional Surfaces (1:2 / 50%)
-   * Starts along the lateral edges of the Safety Area (-saHalf to +saHalf at X = ±saHalf)
-   * and continues along the side edges of the approach fan.
-   */
+  // Helper: Create ICAO Transitional Surfaces (1:2 / 50%)
   const buildTransitionalSurfaces = (geom, appLen, maxDist, saHalf) => {
     const group = new THREE.Group();
     const transLen = Math.min(maxDist * 0.45, 110);
-    const transH = transLen * (geom.transG || 0.5); // 1:2 = 50%
+    const transH = transLen * (geom.transG || 0.5);
     const baseY = 0.22;
 
     const tMat = new THREE.MeshStandardMaterial({
@@ -514,7 +472,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     });
     const tLineMat = new THREE.LineBasicMaterial({ color: 0x06b6d4, transparent: true, opacity: 0.5 });
 
-    // Side 1: Left transitional slope along safety area
     const leftGeo = new THREE.BufferGeometry();
     leftGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array([
       -saHalf, baseY, -saHalf,  -saHalf, baseY, saHalf,  -saHalf - transLen, baseY + transH, saHalf,
@@ -523,7 +480,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     leftGeo.computeVertexNormals();
     group.add(new THREE.Mesh(leftGeo, tMat));
 
-    // Side 2: Right transitional slope along safety area
     const rightGeo = new THREE.BufferGeometry();
     rightGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array([
       saHalf, baseY, -saHalf,  saHalf, baseY, saHalf,  saHalf + transLen, baseY + transH, saHalf,
@@ -532,7 +488,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     rightGeo.computeVertexNormals();
     group.add(new THREE.Mesh(rightGeo, tMat));
 
-    // Outer wireframes
     const leftWire = [
       new THREE.Vector3(-saHalf, baseY, -saHalf),
       new THREE.Vector3(-saHalf - transLen, baseY + transH, -saHalf),
@@ -552,7 +507,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     return group;
   };
 
-  // Helper: Create 3D Approach Flight Path (Descent Glideslope Trajectory)
+  // Helper: Create 3D Approach Flight Path
   const buildFlightPath = (saHalf, appLen, totalH) => {
     const group = new THREE.Group();
     const glidePoints = [];
@@ -576,7 +531,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     pathLine.computeLineDistances();
     group.add(pathLine);
 
-    // Glowing Lead-in Light Beacons along approach path
     const beaconGeo = new THREE.SphereGeometry(0.25, 8, 8);
     const beaconMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
     for (let i = 2; i <= numPoints; i += 4) {
@@ -587,6 +541,114 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     }
 
     return group;
+  };
+
+  /**
+   * Helper: Create 3D Rotor Downwash & Ground Outwash Visualization Layer
+   * Models the vertical contracting induced flow streamtube and radial ground hazard velocity zones.
+   */
+  const buildDownwashVisualization = (dw, geom) => {
+    const group = new THREE.Group();
+    const R = dw.rotorRadiusM;
+    const rotorH = 3.8 * (geom.D / 16.0); // height of rotor disc
+
+    // 1. Vertical Induced Flow Downwash Tube (Contracting from rotor disc to pad)
+    const rTop = R;
+    const rBottom = R * 0.76;
+    const tubeGeo = new THREE.CylinderGeometry(rBottom, rTop, rotorH - 0.22, 32, 4, true);
+    tubeGeo.rotateX(Math.PI);
+    const tubeMat = new THREE.MeshBasicMaterial({
+      color: 0x06b6d4,
+      transparent: true,
+      opacity: 0.16,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const tubeMesh = new THREE.Mesh(tubeGeo, tubeMat);
+    tubeMesh.position.y = 0.22 + (rotorH - 0.22) / 2;
+    group.add(tubeMesh);
+
+    // Spiraling streamlines showing downward vortex
+    const spiralGeo = new THREE.BufferGeometry();
+    const spiralPts = [];
+    for (let i = 0; i <= 80; i++) {
+      const t = i / 80;
+      const angle = t * Math.PI * 6;
+      const curR = rTop + (rBottom - rTop) * t;
+      const curY = rotorH - (rotorH - 0.22) * t;
+      spiralPts.push(new THREE.Vector3(Math.cos(angle) * curR, curY, Math.sin(angle) * curR));
+    }
+    spiralGeo.setFromPoints(spiralPts);
+    const spiralLine = new THREE.Line(
+      spiralGeo,
+      new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.45 })
+    );
+    group.add(spiralLine);
+
+    // 2. Ground Outwash Velocity Hazard Rings
+    const createHazardDisc = (radiusM, colorHex, opacity) => {
+      const discGeo = new THREE.RingGeometry(Math.max(0.5, radiusM - 1.2), radiusM, 64);
+      const discMat = new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: true,
+        opacity,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const disc = new THREE.Mesh(discGeo, discMat);
+      disc.rotation.x = -Math.PI / 2;
+      disc.position.y = 0.08;
+      return disc;
+    };
+
+    // >60 kt Severe Outwash Zone (Red)
+    if (dw.hazardRadii.r60Kt > 1) {
+      group.add(createHazardDisc(dw.hazardRadii.r60Kt, 0xef4444, 0.55));
+    }
+    // >45 kt High Outwash Zone (Orange)
+    if (dw.hazardRadii.r45Kt > 1) {
+      group.add(createHazardDisc(dw.hazardRadii.r45Kt, 0xf97316, 0.45));
+    }
+    // >30 kt Personnel Safety Limit (Amber)
+    if (dw.hazardRadii.r30Kt > 1) {
+      group.add(createHazardDisc(dw.hazardRadii.r30Kt, 0xf59e0b, 0.35));
+    }
+    // >15 kt Outwash Perimeter (Cyan)
+    if (dw.hazardRadii.r15Kt > 1) {
+      group.add(createHazardDisc(dw.hazardRadii.r15Kt, 0x06b6d4, 0.2));
+    }
+
+    // 3. Dynamic Animated Ground Outwash Particles
+    const particleCount = 120;
+    const particleData = [];
+    const pGeom = new THREE.BufferGeometry();
+    const pPositions = new Float32Array(particleCount * 3);
+    const maxR = Math.max(dw.hazardRadii.r15Kt, 40);
+
+    for (let i = 0; i < particleCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 1.0 + Math.random() * maxR;
+      particleData.push({
+        angle,
+        dist,
+        speed: 0.9 + Math.random() * 0.7,
+      });
+      pPositions[i * 3] = Math.cos(angle) * dist;
+      pPositions[i * 3 + 1] = 0.16 + Math.random() * 0.35;
+      pPositions[i * 3 + 2] = Math.sin(angle) * dist;
+    }
+
+    pGeom.setAttribute("position", new THREE.BufferAttribute(pPositions, 3));
+    const pMat = new THREE.PointsMaterial({
+      color: 0x38bdf8,
+      size: 1.4,
+      transparent: true,
+      opacity: 0.75,
+    });
+    const particleSystem = new THREE.Points(pGeom, pMat);
+    group.add(particleSystem);
+
+    return { group, particleSystem, particleData, maxR };
   };
 
   // Main Three.js Scene Setup & Initialization
@@ -640,7 +702,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       sceneRef.current = scene;
       cameraRef.current = camera;
 
-      // Realistic Sky Dome / Ground Lighting
       const lightsGroup = new THREE.Group();
       lightsGroupRef.current = lightsGroup;
 
@@ -669,7 +730,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       lightsGroup.add(rimLight);
       scene.add(lightsGroup);
 
-      // Ground plane
       const groundGeo = new THREE.PlaneGeometry(maxDist * 3, maxDist * 3);
       const groundMat = new THREE.MeshStandardMaterial({
         color: 0x060c18,
@@ -682,7 +742,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       ground.receiveShadow = true;
       scene.add(ground);
 
-      // Fine coordinate grid
       const grid = new THREE.GridHelper(maxDist * 2.4, 48, 0x1e3a8a, 0x0f172a);
       grid.position.y = 0.02;
       if (grid.material) {
@@ -691,7 +750,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       }
       scene.add(grid);
 
-      // Distance Range Rings (50m, 100m, 150m, 200m...)
+      // Distance Range Rings
       const ringsGroup = new THREE.Group();
       ringsGroupRef.current = ringsGroup;
       for (let r = 50; r <= maxDist * 1.1; r += 50) {
@@ -709,7 +768,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       }
       scene.add(ringsGroup);
 
-      // North True Bearing Compass Indicator
+      // North Arrow
       const northArrow = new THREE.ArrowHelper(
         new THREE.Vector3(0, 0, -1),
         new THREE.Vector3(-G.tot * 0.7, 0.1, -G.tot * 0.7),
@@ -720,8 +779,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       );
       scene.add(northArrow);
 
-      // ─── TLOF, FATO & SAFETY AREA HELIPAD COMPLEX ───
-      // 1. Safety Area Ground Base (Full Extent G.tot)
+      // ─── TLOF, FATO & SAFETY AREA ───
       const saBaseGeo = new THREE.BoxGeometry(G.tot, 0.12, G.tot);
       const saBaseMat = new THREE.MeshStandardMaterial({
         color: 0x111c30,
@@ -733,7 +791,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       saBase.receiveShadow = true;
       scene.add(saBase);
 
-      // Safety Area outer boundary perimeter line
       const saEdges = new THREE.EdgesGeometry(saBaseGeo);
       const saLine = new THREE.LineSegments(
         saEdges,
@@ -742,7 +799,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       saLine.position.y = 0.06;
       scene.add(saLine);
 
-      // 2. FATO Pad (G.fato) elevated slightly with custom markings
       const padTexture = createPadTexture(G.fato, G.tlof, G.D, heli.mtow, proj.facility === "vertiport");
       const fatoGeo = new THREE.BoxGeometry(G.fato, 0.3, G.fato);
       const fatoMat = new THREE.MeshStandardMaterial({
@@ -756,7 +812,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       fatoPad.castShadow = true;
       scene.add(fatoPad);
 
-      // TLOF Perimeter Green Inset Lights
       const tlofHalf = G.tlof / 2;
       const tlofLightMat = new THREE.MeshBasicMaterial({ color: 0x10b981 });
       const tlofLightGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.12, 8);
@@ -773,13 +828,11 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
         });
       }
 
-      // Helipad Floodlight / Glow
       const padSpot = new THREE.SpotLight(0x67e8f9, nightMode ? 4.5 : 2.5, G.fato * 3, Math.PI / 3, 0.4, 1.2);
       padSpot.position.set(0, G.fato * 0.9, 0);
       padSpot.target = fatoPad;
       scene.add(padSpot);
 
-      // Windsock (Placed outside the Safety Area)
       const windsock = createWindsock(4.5, zone.wind?.pd || 0);
       windsock.position.set(G.tot * 0.68, 0, G.tot * 0.68);
       scene.add(windsock);
@@ -799,26 +852,28 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       tailRotorRef.current = tailRotorGroup;
       beaconLightsRef.current = [beacon];
 
-      // ─── ICAO OLS SURFACES (APPROACH & TRANSITIONAL) ───
-      // Approach Fan starts at the outer boundary of the Safety Area
+      // ─── ROTOR DOWNWASH & GROUND OUTWASH LAYER ───
+      const dwVis = buildDownwashVisualization(downwash, G);
+      scene.add(dwVis.group);
+      downwashGroupRef.current = dwVis.group;
+      downwashParticlesRef.current = dwVis;
+
+      // ─── ICAO OLS SURFACES ───
       const { group: appSurfaces, appLen, totalH, saHalf } = buildApproachSurfaces(G, maxDist);
       appSurfaces.rotation.y = -((approachHeading * Math.PI) / 180);
       scene.add(appSurfaces);
       approachGroupRef.current = appSurfaces;
 
-      // Transitional surfaces (1:2) along the safety area sides
       const transSurfaces = buildTransitionalSurfaces(G, appLen, maxDist, saHalf);
       transSurfaces.rotation.y = -((approachHeading * Math.PI) / 180);
       scene.add(transSurfaces);
       transitionalGroupRef.current = transSurfaces;
 
-      // 3D Approach Flight Path
       const flightPath = buildFlightPath(saHalf, appLen, totalH);
       flightPath.rotation.y = -((approachHeading * Math.PI) / 180);
       scene.add(flightPath);
       flightPathGroupRef.current = flightPath;
 
-      // Inner Horizontal Surface (IHS 45m standard level disk)
       const ihHeight = G.ih || 45;
       const ihRadius = Math.min(G.ihR || 3000, maxDist * 1.05);
       const ihGeo = new THREE.CylinderGeometry(ihRadius, ihRadius, 0.2, 64);
@@ -836,7 +891,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       scene.add(ihMesh);
       ihMeshRef.current = ihMesh;
 
-      // ─── ACCURATE ICAO OBSTACLE PENETRATION EVALUATION ───
+      // ─── OBSTACLES & PENETRATION ───
       const obstacleMeshes = [];
       const trackRad = (approachHeading * Math.PI) / 180;
       const splay = G.splay || 0.1;
@@ -867,54 +922,45 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
         const bl = o.l || bw;
         const bh = Math.max(o.h || 10, 1.5);
 
-        // Transform (ox, oz) into corridor-aligned coordinates along approach track
-        // along: distance along approach axis (positive = towards approach path)
-        // lateral: absolute distance perpendicular to approach axis
         const along = -(ox * Math.sin(trackRad) + oz * Math.cos(trackRad));
         const lateral = Math.abs(ox * Math.cos(trackRad) - oz * Math.sin(trackRad));
 
-        // Exact OLS allowable calculation based on ICAO surfaces
-        let allowH = 45; // default to Inner Horizontal
+        let allowH = 45;
         let surfaceName = "Inner Horizontal (45m)";
         let insideApproach = false;
 
         if (Math.abs(along) >= saHalf) {
-          // Obstacle is in the approach / departure sector beyond safety area
           const s = Math.abs(along) - saHalf;
           const halfWidthAtS = saHalf + s * splay;
 
           if (lateral <= halfWidthAtS) {
-            // Inside the Approach Fan!
             insideApproach = true;
             surfaceName = `Approach Fan 1:${(1 / (s <= innerLenM ? innerG : outerG)).toFixed(0)}`;
             const inclineH = s <= innerLenM ? s * innerG : innerLenM * innerG + (s - innerLenM) * outerG;
             allowH = 0.22 + inclineH;
           } else {
-            // In the transitional slope flanking the approach fan
             surfaceName = "Transitional Slope (1:2)";
             const fanH = s <= innerLenM ? s * innerG : innerLenM * innerG + (s - innerLenM) * outerG;
             allowH = 0.22 + fanH + (lateral - halfWidthAtS) * transG;
           }
         } else {
-          // Obstacle is abreast of the Safety Area (-saHalf to +saHalf)
           if (lateral <= saHalf) {
-            // Inside Safety Area: strictly 0m obstacle height allowed
             surfaceName = "Safety Area (Ground)";
             allowH = 0.22;
           } else {
-            // Transitional surface sloping up from safety area side
             surfaceName = "Transitional Slope (1:2)";
             allowH = 0.22 + (lateral - saHalf) * transG;
           }
         }
 
-        // Cap maximum allowable by Inner Horizontal surface height
         allowH = Math.min(allowH, G.ih || 45);
-
         const penetrates = bh > allowH;
         const statusColor = penetrates ? 0xef4444 : 0x10b981;
 
-        // Building / Structure Footprint
+        // Downwash at structure location
+        const obsRadialDist = Math.hypot(ox, oz);
+        const obsOutwash = downwash.getVelocityAtDistance(obsRadialDist);
+
         let mesh;
         if (isFence && o.corners && o.corners.length >= 2) {
           const pts = o.corners.map((c) => new THREE.Vector3(c.x - cent.x, 0.2 + bh / 2, c.y - cent.y));
@@ -988,11 +1034,12 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
             penetrates,
             insideApproach,
             clearance: penetrates ? -(bh - allowH) : (allowH - bh),
+            downwashKt: obsOutwash.kt,
+            downwashMs: obsOutwash.ms,
           };
           obstacleMeshes.push(mesh);
         }
 
-        // Height line indicator
         const hPoints = [new THREE.Vector3(ox, 0, oz), new THREE.Vector3(ox, bh, oz)];
         const hLine = new THREE.Line(
           new THREE.BufferGeometry().setFromPoints(hPoints),
@@ -1000,7 +1047,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
         );
         scene.add(hLine);
 
-        // Flashing Aviation Warning Beacon on top of tall or penetrating structures
         if (penetrates || bh > 20) {
           const topLight = new THREE.PointLight(0xef4444, 1.8, 25);
           topLight.position.set(ox, bh + 0.5, oz);
@@ -1008,7 +1054,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
           beaconLights.push(topLight);
         }
 
-        // Penetration Plane Marker: Highlight slice that penetrates OLS
         if (penetrates && allowH < bh) {
           const penDiscGeo = new THREE.RingGeometry(bw * 0.35, bw * 0.75, 20);
           const penDiscMat = new THREE.MeshBasicMaterial({
@@ -1030,7 +1075,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
           scene.add(breachLine);
         }
 
-        // Connection line back to FATO center
         const tracePts = [new THREE.Vector3(0, 0.25, 0), new THREE.Vector3(ox, 0.25, oz)];
         const traceLine = new THREE.Line(
           new THREE.BufferGeometry().setFromPoints(tracePts),
@@ -1061,6 +1105,23 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
           if (tailRotorRef.current) {
             tailRotorRef.current.rotation.x += 0.6;
           }
+        }
+
+        // Animate ground downwash outwash particles radiating outwards
+        if (showDownwash && downwashParticlesRef.current?.particleSystem) {
+          const { particleSystem, particleData, maxR } = downwashParticlesRef.current;
+          const pos = particleSystem.geometry.attributes.position.array;
+          for (let i = 0; i < particleData.length; i++) {
+            const p = particleData[i];
+            p.dist += p.speed * (dt * 24);
+            if (p.dist > maxR) {
+              p.dist = 0.8 + Math.random() * 2.0;
+              p.angle = Math.random() * Math.PI * 2;
+            }
+            pos[i * 3] = Math.cos(p.angle) * p.dist;
+            pos[i * 3 + 2] = Math.sin(p.angle) * p.dist;
+          }
+          particleSystem.geometry.attributes.position.needsUpdate = true;
         }
 
         animState.beaconTime += dt;
@@ -1183,7 +1244,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
         if (animId) cancelAnimationFrame(animId);
       };
     }
-  }, [zone, proj, size, G, cent, heli, nightMode]);
+  }, [zone, proj, size, G, cent, heli, nightMode, downwash]);
 
   // Synchronize Layer Visibilities & Heading dynamically
   useEffect(() => {
@@ -1199,6 +1260,9 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       flightPathGroupRef.current.visible = showFlightPath;
       flightPathGroupRef.current.rotation.y = -((approachHeading * Math.PI) / 180);
     }
+    if (downwashGroupRef.current) {
+      downwashGroupRef.current.visible = showDownwash;
+    }
     if (aircraftGroupRef.current) {
       aircraftGroupRef.current.visible = showAircraft;
       aircraftGroupRef.current.rotation.y = -((approachHeading * Math.PI) / 180);
@@ -1210,7 +1274,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       ringsGroupRef.current.visible = showRings;
     }
     animStateRef.current.autoRotate = autoRotate;
-  }, [showApproach, showTransitional, showFlightPath, showInnerHoriz, showAircraft, showRings, autoRotate, approachHeading]);
+  }, [showApproach, showTransitional, showFlightPath, showDownwash, showInnerHoriz, showAircraft, showRings, autoRotate, approachHeading]);
 
   // Snapshot generation for reports
   useEffect(() => {
@@ -1315,7 +1379,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       >
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 9, fontWeight: 800, color: K.cy, letterSpacing: 2 }}>PRECISION 3D OLS</span>
+            <span style={{ fontSize: 9, fontWeight: 800, color: K.cy, letterSpacing: 2 }}>PRECISION 3D OLS & DOWNWASH</span>
             <span
               style={{
                 fontSize: 9,
@@ -1329,15 +1393,25 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
             >
               {violationCount > 0 ? `${violationCount} PENETRATIONS` : "OLS CLEAR"}
             </span>
-            <span style={{ fontSize: 9, color: K.mu }}>
-              Starts @ Safety Area Edge ({(G.tot / 2).toFixed(1)}m from center)
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "2px 6px",
+                borderRadius: 4,
+                background: downwash.severityColor + "20",
+                color: downwash.severityColor,
+                border: "1px solid " + downwash.severityColor + "50",
+              }}
+            >
+              💨 {downwash.vMaxKt.toFixed(0)} KT OUTWASH
             </span>
           </div>
           <div style={{ fontSize: 16, fontWeight: 800, color: K.tx, marginTop: 4, letterSpacing: -0.4 }}>
-            Zone {zone.lb} · {heli.nm} (D={G.D.toFixed(1)}m)
+            Zone {zone.lb} · {heli.nm} (D={G.D.toFixed(1)}m · MTOW {(heli.mtow / 1000).toFixed(1)}t)
           </div>
           <div style={{ fontSize: 9, color: K.mu, marginTop: 2 }}>
-            FATO {G.fato.toFixed(0)}m · Safety Area {G.tot.toFixed(0)}m · Approach 1:{(1 / G.appG).toFixed(1)} · Transitional 1:2
+            FATO {G.fato.toFixed(0)}m · Safety Area {G.tot.toFixed(0)}m · Downwash {downwash.severityLabel}
           </div>
         </div>
 
@@ -1444,10 +1518,11 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
             boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
           }}
         >
-          <div style={{ fontSize: 8, fontWeight: 800, color: K.mu, letterSpacing: 1.2 }}>OLS LAYERS</div>
-          {pillBtn(showApproach, () => setShowApproach(!showApproach), `Approach (1:${(1 / G.appG).toFixed(0)})`, "📐")}
+          <div style={{ fontSize: 8, fontWeight: 800, color: K.mu, letterSpacing: 1.2 }}>LAYERS</div>
+          {pillBtn(showApproach, () => setShowApproach(!showApproach), `Approach 1:${(1 / G.appG).toFixed(0)}`, "📐")}
           {pillBtn(showTransitional, () => setShowTransitional(!showTransitional), "Transitional (1:2)", "🔷")}
-          {pillBtn(showFlightPath, () => setShowFlightPath(!showFlightPath), "Flight Descent Path", "🛬")}
+          {pillBtn(showDownwash, () => setShowDownwash(!showDownwash), "Rotor Downwash", "💨")}
+          {pillBtn(showFlightPath, () => setShowFlightPath(!showFlightPath), "Flight Path", "🛬")}
           {pillBtn(showInnerHoriz, () => setShowInnerHoriz(!showInnerHoriz), `Inner Horiz (+${G.ih}m)`, "🟣")}
           {pillBtn(showAircraft, () => setShowAircraft(!showAircraft), heli.nm.split(" ")[0], "🚁")}
           {pillBtn(showRings, () => setShowRings(!showRings), "Distance Rings", "🎯")}
@@ -1470,7 +1545,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
           }}
         >
           <div style={{ fontSize: 8, fontWeight: 800, color: K.cy, letterSpacing: 1.2, marginBottom: 8 }}>
-            SURFACE GEOMETRY
+            LEGEND & DOWNWASH
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 9, color: K.dm }}>
@@ -1479,26 +1554,63 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 9, color: K.dm }}>
               <div style={{ width: 14, height: 4, background: "#f59e0b", borderRadius: 1 }} />
-              <span>Safety Area ({G.tot.toFixed(0)}m)</span>
+              <span>Approach Fan</span>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 9, color: K.dm }}>
-              <div style={{ width: 14, height: 4, background: "#10b981", border: "1px dashed #ffffff", borderRadius: 1 }} />
-              <span>Threshold Line (Start)</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 9, color: K.dm }}>
-              <div style={{ width: 14, height: 4, background: "#f59e0b", opacity: 0.5, borderRadius: 1 }} />
-              <span>Approach Fan (1:{(1 / G.appG).toFixed(0)})</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 9, color: K.dm }}>
-              <div style={{ width: 14, height: 4, background: "#06b6d4", opacity: 0.5, borderRadius: 1 }} />
-              <span>Transitional Slope (1:2)</span>
-            </div>
+            {showDownwash && (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 9, color: "#f87171" }}>
+                  <div style={{ width: 10, height: 2, background: "#ef4444" }} />
+                  <span>Outwash &gt;60 kt ({downwash.hazardRadii.r60Kt}m)</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 9, color: "#fbbf24" }}>
+                  <div style={{ width: 10, height: 2, background: "#f59e0b" }} />
+                  <span>Caution &gt;30 kt ({downwash.hazardRadii.r30Kt}m)</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 9, color: "#38bdf8" }}>
+                  <div style={{ width: 10, height: 2, background: "#06b6d4" }} />
+                  <span>Perimeter &gt;15 kt ({downwash.hazardRadii.r15Kt}m)</span>
+                </div>
+              </>
+            )}
             <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 9, color: K.dm }}>
               <div style={{ width: 7, height: 7, borderRadius: 2, background: "#ef4444" }} />
-              <span>Breach Penetration</span>
+              <span>OLS Breach</span>
             </div>
           </div>
         </div>
+
+        {/* Aerodynamic Downwash Telemetry Widget */}
+        {showDownwash && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: 42,
+              left: 14,
+              padding: "10px 14px",
+              borderRadius: 8,
+              background: "rgba(5,11,22,0.92)",
+              border: "1px solid " + downwash.severityColor + "60",
+              backdropFilter: "blur(12px)",
+              boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+              maxWidth: 260,
+              fontSize: 9,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontWeight: 800, color: K.cy, letterSpacing: 1 }}>ROTOR DOWNWASH</span>
+              <span style={{ fontWeight: 700, color: downwash.severityColor }}>{downwash.severity.toUpperCase()}</span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 10px", marginTop: 6, color: K.dm }}>
+              <div>Peak Outwash: <strong style={{ color: K.tx }}>{downwash.vMaxKt.toFixed(0)} kt</strong></div>
+              <div>Induced (OGE): <strong style={{ color: K.tx }}>{downwash.viKt.toFixed(0)} kt</strong></div>
+              <div>Disc Loading: <strong style={{ color: K.tx }}>{downwash.discLoadingKgM2.toFixed(1)} kg/m²</strong></div>
+              <div>Rotor Diam: <strong style={{ color: K.tx }}>{heli.rtr || G.D}m</strong></div>
+            </div>
+            <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", marginTop: 6, paddingTop: 4, color: K.mu }}>
+              Personnel 30 kt Limit: <strong style={{ color: "#fbbf24" }}>{downwash.hazardRadii.r30Kt}m radius</strong>
+            </div>
+          </div>
+        )}
 
         {/* Hovered Obstacle Inspector Floating Tag */}
         {hoveredObs && (
@@ -1515,7 +1627,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
               boxShadow: hoveredObs.penetrates
                 ? "0 0 20px rgba(239,68,68,0.4)"
                 : "0 0 20px rgba(16,185,129,0.3)",
-              maxWidth: 260,
+              maxWidth: 270,
               zIndex: 10,
             }}
           >
@@ -1547,7 +1659,15 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
             >
               {hoveredObs.penetrates
                 ? `Breach: +${(-hoveredObs.clearance).toFixed(1)}m above surface`
-                : `Clearance margin: ${hoveredObs.clearance.toFixed(1)}m`}
+                : `Clearance: ${hoveredObs.clearance.toFixed(1)}m`}
+            </div>
+
+            {/* Downwash Impact on this Obstacle */}
+            <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", marginTop: 6, paddingTop: 4, fontSize: 9 }}>
+              <span style={{ color: K.mu }}>Downwash at structure: </span>
+              <strong style={{ color: hoveredObs.downwashKt > 30 ? "#f87171" : "#38bdf8" }}>
+                {hoveredObs.downwashKt.toFixed(0)} kt ({hoveredObs.downwashMs.toFixed(1)} m/s)
+              </strong>
             </div>
           </div>
         )}
@@ -1557,8 +1677,9 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
           style={{
             position: "absolute",
             bottom: 12,
-            left: 14,
-            padding: "4px 10px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            padding: "4px 12px",
             borderRadius: 6,
             background: "rgba(5,11,22,0.85)",
             border: "1px solid " + K.bd,
@@ -1568,6 +1689,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
             display: "flex",
             alignItems: "center",
             gap: 8,
+            whiteSpace: "nowrap",
           }}
         >
           <span>🖱️ Left drag: Orbit</span>
@@ -1576,7 +1698,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
           <span>•</span>
           <span>Scroll: Zoom</span>
           <span>•</span>
-          <span>Hover structure for specs</span>
+          <span>Hover structure for OLS & Downwash</span>
         </div>
       </div>
     </div>
