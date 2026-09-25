@@ -14,13 +14,17 @@ export function calcGeom(p) {
   const innerLenM = pc.innerLenM ?? (pc.innerLenFactor * D);
   const ih = pc.ihHeightM ?? pc.ih;
   const ihR = pc.ihRadiusM ?? 3000;
+  const maxWFactor = pc.maxWFactor ?? (p.pc === "pc1" ? 7 : p.pc === "pc2" ? 4 : 3);
+  const maxWidth = Math.max(tot, D * maxWFactor);
   return {
     D, fato, sa, tlof, tot,
     appG: pc.appG, transG: pc.transG, innerG: pc.innerG, outerG: pc.outerG ?? pc.appG,
     splay: pc.splay, appLen: pc.appLen, innerLenM, outerLenM: pc.outerLenM,
     maxSlope: pc.maxSlope, maxSA: pc.maxSA,
     ih, ihR,
-    aIn: tot, aOut: tot + 2 * pc.appLen * pc.splay,
+    maxWidth, maxWFactor,
+    aIn: tot,
+    aOut: Math.min(maxWidth, tot + 2 * pc.appLen * pc.splay),
   };
 }
 
