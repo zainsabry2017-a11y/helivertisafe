@@ -8,6 +8,9 @@ import { zonePadCenter } from "../../engine/geometry.js";
 /**
  * High-Performance, Precision 3D Helipad & OLS Limitation Surface Visualizer.
  * Fully compliant with ICAO Annex 14 Vol II & Saudi GACAR Part 138 geometry.
+ *
+ * Approach surface correctly originates at the outer boundary of the Safety Area
+ * (per ICAO Annex 14 Vol II, Section 4.2.14) with true lateral splay and 2-stage gradient.
  */
 export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnapshotReady }, ref) {
   const mountRef = useRef(null);
@@ -33,13 +36,15 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     baseCamDist: 180,
   });
 
-  // Layer toggles
+  // Layer toggles & visual modes
   const [showApproach, setShowApproach] = useState(true);
   const [showTransitional, setShowTransitional] = useState(true);
   const [showInnerHoriz, setShowInnerHoriz] = useState(false);
   const [showAircraft, setShowAircraft] = useState(true);
   const [showRings, setShowRings] = useState(true);
+  const [showFlightPath, setShowFlightPath] = useState(true);
   const [showRotorAnim, setShowRotorAnim] = useState(true);
+  const [nightMode, setNightMode] = useState(false);
   const [autoRotate, setAutoRotate] = useState(false);
   const [approachHeading, setApproachHeading] = useState(() => (zone?.wind?.pd !== undefined ? zone.wind.pd : 0));
   const [hoveredObs, setHoveredObs] = useState(null);
@@ -48,6 +53,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
   // References to dynamic objects for live updates without full scene rebuild
   const approachGroupRef = useRef(null);
   const transitionalGroupRef = useRef(null);
+  const flightPathGroupRef = useRef(null);
   const ihMeshRef = useRef(null);
   const aircraftGroupRef = useRef(null);
   const rotorRef = useRef(null);
@@ -55,6 +61,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
   const ringsGroupRef = useRef(null);
   const beaconLightsRef = useRef([]);
   const obstacleMeshesRef = useRef([]);
+  const lightsGroupRef = useRef(null);
 
   const G = useMemo(() => calcGeom(proj), [proj]);
   const heli = useMemo(() => getHeli(proj), [proj]);
@@ -94,11 +101,11 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       dr.rotY = 0.78;
       dr.zoom = 1.0;
     } else if (preset === "top") {
-      dr.rotX = Math.PI / 2 - 0.001; // almost straight down
+      dr.rotX = Math.PI / 2 - 0.001; // top-down 2D
       dr.rotY = 0;
       dr.zoom = 1.15;
     } else if (preset === "glideslope") {
-      // Look straight down the approach track from the outer approach end
+      // Look straight down the approach track from the outer approach end towards pad
       const rad = (approachHeading * Math.PI) / 180;
       dr.rotX = 0.14; // ~8 degree glideslope viewpoint
       dr.rotY = rad + Math.PI;
@@ -123,7 +130,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     ctx.fillStyle = "#1e293b";
     ctx.fillRect(0, 0, 1024, 1024);
 
-    // Subtle concrete grain pattern
+    // Concrete grain pattern
     ctx.fillStyle = "#273549";
     for (let i = 0; i < 400; i++) {
       const rx = Math.random() * 1024;
@@ -186,9 +193,9 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
   // Helper: Procedural 3D Helicopter / eVTOL Aircraft Model
   const createAircraftModel = (dVal, heliMeta, isVertiport) => {
     const group = new THREE.Group();
-    const scale = dVal / 16.0; // scale based on reference 16m helicopter
+    const scale = dVal / 16.0;
 
-    // Fuselage material: Sleek aerospace carbon/metallic
+    // Fuselage material
     const bodyMat = new THREE.MeshStandardMaterial({
       color: isVertiport ? 0x06b6d4 : 0x2563eb,
       metalness: 0.75,
@@ -287,7 +294,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       blade.rotation.y = -angle;
       rotorGroup.add(blade);
 
-      // High-visibility blade tip stripe (Yellow / Day-glow)
       const tipGeo = new THREE.BoxGeometry(rRadius * 0.15, 0.06 * scale, 0.39 * scale);
       const tipMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
       const tip = new THREE.Mesh(tipGeo, tipMat);
@@ -307,14 +313,14 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     tailRotorGroup.add(tb1, tb2);
     group.add(tailRotorGroup);
 
-    // Navigation Lights: Port Red, Starboard Green, Tail White
+    // Navigation Lights
     const navGeo = new THREE.SphereGeometry(0.12 * scale, 8, 8);
     const redLight = new THREE.Mesh(navGeo, new THREE.MeshBasicMaterial({ color: 0xef4444 }));
-    redLight.position.set(0, 1.8 * scale, 1.4 * scale); // Port (Left)
+    redLight.position.set(0, 1.8 * scale, 1.4 * scale);
     const greenLight = new THREE.Mesh(navGeo, new THREE.MeshBasicMaterial({ color: 0x22c55e }));
-    greenLight.position.set(0, 1.8 * scale, -1.4 * scale); // Starboard (Right)
+    greenLight.position.set(0, 1.8 * scale, -1.4 * scale);
     const tailBeacon = new THREE.Mesh(navGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
-    tailBeacon.position.set(9.2 * scale, 3.2 * scale, 0); // Tail top
+    tailBeacon.position.set(9.2 * scale, 3.2 * scale, 0);
     group.add(redLight, greenLight, tailBeacon);
 
     // Flashing Anti-Collision Beacon Light
@@ -325,17 +331,15 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     return { group, rotorGroup, tailRotorGroup, beacon };
   };
 
-  // Helper: Create Windsock (Aviation wind direction indicator)
+  // Helper: Create Windsock
   const createWindsock = (height, headingDeg) => {
     const group = new THREE.Group();
-    // Mast
     const poleGeo = new THREE.CylinderGeometry(0.08, 0.12, height, 8);
     const poleMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.8 });
     const pole = new THREE.Mesh(poleGeo, poleMat);
     pole.position.y = height / 2;
     group.add(pole);
 
-    // Basket frame
     const ringGeo = new THREE.TorusGeometry(0.45, 0.04, 8, 16);
     const ringMat = new THREE.MeshBasicMaterial({ color: 0xf97316 });
     const ring = new THREE.Mesh(ringGeo, ringMat);
@@ -343,7 +347,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     ring.position.y = height;
     group.add(ring);
 
-    // Cone Sock (Orange & White bands)
     const sockGeo = new THREE.ConeGeometry(0.45, 2.2, 12, 1, true);
     sockGeo.rotateZ(Math.PI / 2);
     const sockMat = new THREE.MeshStandardMaterial({
@@ -353,61 +356,93 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     });
     const sock = new THREE.Mesh(sockGeo, sockMat);
     sock.position.set(1.1, height, 0);
-    // Orient with wind direction
     group.rotation.y = -((headingDeg - 90) * Math.PI) / 180;
     group.add(sock);
 
     return group;
   };
 
-  // Helper: Create ICAO Approach/Take-off Fan Geometry with 2-stage gradient
+  /**
+   * Helper: Create ICAO Annex 14 Vol II Approach/Take-off Climb Surface
+   * CRITICAL COMPLIANCE FIX:
+   * Per Section 4.2.14, the inner edge is located at the OUTER BOUNDARY OF THE SAFETY AREA
+   * (at distance saHalf = geom.tot / 2 along the approach axis from FATO center).
+   */
   const buildApproachSurfaces = (geom, maxDist) => {
     const group = new THREE.Group();
-    const innerW = geom.tot / 2;
-    const appLen = Math.min(geom.appLen, maxDist * 0.95);
+    const saHalf = geom.tot / 2; // Outer boundary of safety area
+    const innerW = saHalf;       // Inner edge width matches safety area width
+    const appLen = Math.min(geom.appLen, maxDist * 1.15);
     const splay = geom.splay || 0.1;
     const outerW = innerW + appLen * splay;
 
-    // First section & Second section slope calculation
-    const innerLen = Math.min(geom.innerLenM || appLen * 0.3, appLen);
+    // 2-Stage slope profile (ICAO PC-1 / PC-2 / PC-3)
+    const innerLen = Math.min(geom.innerLenM || appLen * 0.35, appLen);
     const innerH = innerLen * geom.innerG;
     const outerLen = appLen - innerLen;
     const totalH = innerH + outerLen * geom.outerG;
     const midW = innerW + innerLen * splay;
 
+    const baseY = 0.22; // Pad and safety area elevation
+
     const appMat = new THREE.MeshStandardMaterial({
       color: 0xf59e0b,
       transparent: true,
-      opacity: 0.12,
+      opacity: 0.14,
       side: THREE.DoubleSide,
       emissive: 0xd97706,
       emissiveIntensity: 0.12,
       depthWrite: false,
     });
-    const lineMat = new THREE.LineBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.65 });
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.75 });
     const clLineMat = new THREE.LineDashedMaterial({ color: 0xfbbf24, dashSize: 4, gapSize: 2 });
+    const threshMat = new THREE.LineBasicMaterial({ color: 0x10b981, linewidth: 3 });
 
-    // Build one direction (Z negative), then clone for reciprocal (Z positive)
+    // Build one direction (Z negative = Primary Approach), then reciprocal (Z positive = Departure)
     const createFan = (dirSign) => {
       const fanGroup = new THREE.Group();
-      const geom1 = new THREE.BufferGeometry();
-      // 4 corners of first stage (or full stage)
-      const v0 = [-innerW, 0.3, 0];
-      const v1 = [innerW, 0.3, 0];
-      const v2 = [midW, innerH, dirSign * innerLen];
-      const v3 = [-midW, innerH, dirSign * innerLen];
-      const v4 = [outerW, totalH, dirSign * appLen];
-      const v5 = [-outerW, totalH, dirSign * appLen];
+
+      // Z coordinates: Starting AT outer boundary of Safety Area, moving away from pad
+      const z0 = dirSign * saHalf;
+      const z1 = dirSign * (saHalf + innerLen);
+      const z2 = dirSign * (saHalf + appLen);
+
+      const y0 = baseY;
+      const y1 = baseY + innerH;
+      const y2 = baseY + totalH;
+
+      // Stage 1 & Stage 2 Quads
+      const v0 = [-innerW, y0, z0];
+      const v1 = [innerW, y0, z0];
+      const v2 = [midW, y1, z1];
+      const v3 = [-midW, y1, z1];
+      const v4 = [outerW, y2, z2];
+      const v5 = [-outerW, y2, z2];
 
       const vertices = new Float32Array([
         ...v0, ...v1, ...v2, ...v0, ...v2, ...v3, // Stage 1
         ...v3, ...v2, ...v4, ...v3, ...v4, ...v5, // Stage 2
       ]);
-      geom1.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
-      geom1.computeVertexNormals();
+      const fanGeom = new THREE.BufferGeometry();
+      fanGeom.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
+      fanGeom.computeVertexNormals();
 
-      const mesh = new THREE.Mesh(geom1, appMat);
+      const mesh = new THREE.Mesh(fanGeom, appMat);
       fanGroup.add(mesh);
+
+      // Approach Inner Edge Threshold Marker Line (Green aviation threshold bar)
+      const threshPts = [new THREE.Vector3(-innerW, y0 + 0.05, z0), new THREE.Vector3(innerW, y0 + 0.05, z0)];
+      const threshLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(threshPts), threshMat);
+      fanGroup.add(threshLine);
+
+      // Threshold Inset Green LED Markers along the inner edge
+      const threshLightGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.15, 8);
+      const threshLightMat = new THREE.MeshBasicMaterial({ color: 0x10b981 });
+      for (let k = -innerW + 1; k <= innerW; k += Math.max(2.5, innerW / 4)) {
+        const tl = new THREE.Mesh(threshLightGeo, threshLightMat);
+        tl.position.set(k, y0 + 0.08, z0);
+        fanGroup.add(tl);
+      }
 
       // Outer wireframe edge lines
       const edgePoints = [
@@ -422,27 +457,30 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       const edgeLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(edgePoints), lineMat);
       fanGroup.add(edgeLine);
 
-      // Centerline glideslope trace
+      // Centerline glideslope trace starting from Threshold
       const clPoints = [
-        new THREE.Vector3(0, 0.3, 0),
-        new THREE.Vector3(0, innerH, dirSign * innerLen),
-        new THREE.Vector3(0, totalH, dirSign * appLen),
+        new THREE.Vector3(0, y0, z0),
+        new THREE.Vector3(0, y1, z1),
+        new THREE.Vector3(0, y2, z2),
       ];
       const clGeom = new THREE.BufferGeometry().setFromPoints(clPoints);
       const clLine = new THREE.Line(clGeom, clLineMat);
       clLine.computeLineDistances();
       fanGroup.add(clLine);
 
-      // Distance crossbars every 50m
+      // Distance crossbars every 50m along approach
       for (let dist = 50; dist < appLen; dist += 50) {
-        const t = dist / appLen;
         const curW = innerW + dist * splay;
         const curH = dist <= innerLen ? dist * geom.innerG : innerH + (dist - innerLen) * geom.outerG;
+        const curZ = dirSign * (saHalf + dist);
         const barPts = [
-          new THREE.Vector3(-curW, curH, dirSign * dist),
-          new THREE.Vector3(curW, curH, dirSign * dist),
+          new THREE.Vector3(-curW, baseY + curH, curZ),
+          new THREE.Vector3(curW, baseY + curH, curZ),
         ];
-        const barLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(barPts), new THREE.LineBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.35 }));
+        const barLine = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints(barPts),
+          new THREE.LineBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.35 })
+        );
         fanGroup.add(barLine);
       }
 
@@ -451,16 +489,19 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
 
     group.add(createFan(-1)); // Primary approach fan
     group.add(createFan(1));  // Reciprocal departure fan
-    return { group, appLen, totalH };
+    return { group, appLen, totalH, saHalf };
   };
 
-  // Helper: Create ICAO Transitional Surfaces (1:2 slope)
-  const buildTransitionalSurfaces = (geom, appLen, maxDist) => {
+  /**
+   * Helper: Create ICAO Transitional Surfaces (1:2 / 50%)
+   * Starts along the lateral edges of the Safety Area (-saHalf to +saHalf at X = ±saHalf)
+   * and continues along the side edges of the approach fan.
+   */
+  const buildTransitionalSurfaces = (geom, appLen, maxDist, saHalf) => {
     const group = new THREE.Group();
-    const innerW = geom.tot / 2;
-    const transLen = Math.min(maxDist * 0.45, 120);
+    const transLen = Math.min(maxDist * 0.45, 110);
     const transH = transLen * (geom.transG || 0.5); // 1:2 = 50%
-    const halfApp = Math.min(appLen, maxDist * 0.85);
+    const baseY = 0.22;
 
     const tMat = new THREE.MeshStandardMaterial({
       color: 0x06b6d4,
@@ -473,40 +514,77 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     });
     const tLineMat = new THREE.LineBasicMaterial({ color: 0x06b6d4, transparent: true, opacity: 0.5 });
 
-    // Left transitional slope
+    // Side 1: Left transitional slope along safety area
     const leftGeo = new THREE.BufferGeometry();
     leftGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array([
-      -innerW, 0.3, -halfApp,  -innerW, 0.3, halfApp,  -innerW - transLen, transH, halfApp,
-      -innerW, 0.3, -halfApp,  -innerW - transLen, transH, halfApp,  -innerW - transLen, transH, -halfApp,
+      -saHalf, baseY, -saHalf,  -saHalf, baseY, saHalf,  -saHalf - transLen, baseY + transH, saHalf,
+      -saHalf, baseY, -saHalf,  -saHalf - transLen, baseY + transH, saHalf,  -saHalf - transLen, baseY + transH, -saHalf,
     ]), 3));
     leftGeo.computeVertexNormals();
     group.add(new THREE.Mesh(leftGeo, tMat));
 
-    // Right transitional slope
+    // Side 2: Right transitional slope along safety area
     const rightGeo = new THREE.BufferGeometry();
     rightGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array([
-      innerW, 0.3, -halfApp,  innerW, 0.3, halfApp,  innerW + transLen, transH, halfApp,
-      innerW, 0.3, -halfApp,  innerW + transLen, transH, halfApp,  innerW + transLen, transH, -halfApp,
+      saHalf, baseY, -saHalf,  saHalf, baseY, saHalf,  saHalf + transLen, baseY + transH, saHalf,
+      saHalf, baseY, -saHalf,  saHalf + transLen, baseY + transH, saHalf,  saHalf + transLen, baseY + transH, -saHalf,
     ]), 3));
     rightGeo.computeVertexNormals();
     group.add(new THREE.Mesh(rightGeo, tMat));
 
-    // Boundary wireframes
+    // Outer wireframes
     const leftWire = [
-      new THREE.Vector3(-innerW, 0.3, -halfApp),
-      new THREE.Vector3(-innerW - transLen, transH, -halfApp),
-      new THREE.Vector3(-innerW - transLen, transH, halfApp),
-      new THREE.Vector3(-innerW, 0.3, halfApp),
+      new THREE.Vector3(-saHalf, baseY, -saHalf),
+      new THREE.Vector3(-saHalf - transLen, baseY + transH, -saHalf),
+      new THREE.Vector3(-saHalf - transLen, baseY + transH, saHalf),
+      new THREE.Vector3(-saHalf, baseY, saHalf),
     ];
     group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(leftWire), tLineMat));
 
     const rightWire = [
-      new THREE.Vector3(innerW, 0.3, -halfApp),
-      new THREE.Vector3(innerW + transLen, transH, -halfApp),
-      new THREE.Vector3(innerW + transLen, transH, halfApp),
-      new THREE.Vector3(innerW, 0.3, halfApp),
+      new THREE.Vector3(saHalf, baseY, -saHalf),
+      new THREE.Vector3(saHalf + transLen, baseY + transH, -saHalf),
+      new THREE.Vector3(saHalf + transLen, baseY + transH, saHalf),
+      new THREE.Vector3(saHalf, baseY, saHalf),
     ];
     group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(rightWire), tLineMat));
+
+    return group;
+  };
+
+  // Helper: Create 3D Approach Flight Path (Descent Glideslope Trajectory)
+  const buildFlightPath = (saHalf, appLen, totalH) => {
+    const group = new THREE.Group();
+    const glidePoints = [];
+    const numPoints = 20;
+
+    for (let i = 0; i <= numPoints; i++) {
+      const t = i / numPoints;
+      const z = -(saHalf + appLen * (1 - t));
+      const y = 0.4 + (totalH + 12) * Math.pow(1 - t, 1.25);
+      glidePoints.push(new THREE.Vector3(0, y, z));
+    }
+
+    const pathGeom = new THREE.BufferGeometry().setFromPoints(glidePoints);
+    const pathMat = new THREE.LineDashedMaterial({
+      color: 0x38bdf8,
+      dashSize: 3,
+      gapSize: 2,
+      linewidth: 2,
+    });
+    const pathLine = new THREE.Line(pathGeom, pathMat);
+    pathLine.computeLineDistances();
+    group.add(pathLine);
+
+    // Glowing Lead-in Light Beacons along approach path
+    const beaconGeo = new THREE.SphereGeometry(0.25, 8, 8);
+    const beaconMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+    for (let i = 2; i <= numPoints; i += 4) {
+      const pt = glidePoints[i];
+      const bm = new THREE.Mesh(beaconGeo, beaconMat);
+      bm.position.copy(pt);
+      group.add(bm);
+    }
 
     return group;
   };
@@ -522,13 +600,14 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       const h = size;
 
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x040812);
-      scene.fog = new THREE.FogExp2(0x060c18, 0.0016);
+      const bgColor = nightMode ? 0x02050e : 0x040812;
+      const fogColor = nightMode ? 0x02050e : 0x060c18;
+      scene.background = new THREE.Color(bgColor);
+      scene.fog = new THREE.FogExp2(fogColor, 0.0016);
 
       const camera = new THREE.PerspectiveCamera(46, w / h, 1, 3000);
       const obs = Array.isArray(zone.obs) ? zone.obs : [];
       const maxObsDist = Math.max(...obs.map((o) => o.d || 50), 120);
-      const maxObsH = Math.max(...obs.map((o) => o.h || 10), 30);
       const maxDist = Math.max(maxObsDist * 1.3, G.fato * 3, 140);
 
       dragRef.current.baseCamDist = maxDist * 2.2;
@@ -553,7 +632,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.12;
+      renderer.toneMappingExposure = nightMode ? 1.4 : 1.12;
 
       mountRef.current.innerHTML = "";
       mountRef.current.appendChild(renderer.domElement);
@@ -562,15 +641,18 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       cameraRef.current = camera;
 
       // Realistic Sky Dome / Ground Lighting
-      const hemiLight = new THREE.HemisphereLight(0x93c5fd, 0x091220, 0.55);
-      scene.add(hemiLight);
+      const lightsGroup = new THREE.Group();
+      lightsGroupRef.current = lightsGroup;
 
-      const ambLight = new THREE.AmbientLight(0x334155, 0.35);
-      scene.add(ambLight);
+      const hemiLight = new THREE.HemisphereLight(0x93c5fd, 0x091220, nightMode ? 0.2 : 0.55);
+      lightsGroup.add(hemiLight);
 
-      const sunLight = new THREE.DirectionalLight(0xfff7ed, 1.4);
+      const ambLight = new THREE.AmbientLight(0x334155, nightMode ? 0.15 : 0.35);
+      lightsGroup.add(ambLight);
+
+      const sunLight = new THREE.DirectionalLight(0xfff7ed, nightMode ? 0.25 : 1.4);
       sunLight.position.set(maxDist * 1.2, maxDist * 1.8, maxDist * 0.9);
-      sunLight.castShadow = true;
+      sunLight.castShadow = !nightMode;
       sunLight.shadow.mapSize.width = 2048;
       sunLight.shadow.mapSize.height = 2048;
       sunLight.shadow.bias = -0.0004;
@@ -580,13 +662,14 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       sunLight.shadow.camera.right = maxDist * 1.8;
       sunLight.shadow.camera.top = maxDist * 1.8;
       sunLight.shadow.camera.bottom = -maxDist * 1.8;
-      scene.add(sunLight);
+      lightsGroup.add(sunLight);
 
-      const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.45);
+      const rimLight = new THREE.DirectionalLight(0x38bdf8, nightMode ? 0.2 : 0.45);
       rimLight.position.set(-maxDist, maxDist * 0.6, -maxDist);
-      scene.add(rimLight);
+      lightsGroup.add(rimLight);
+      scene.add(lightsGroup);
 
-      // Ground plane with aerospace terrain grid
+      // Ground plane
       const groundGeo = new THREE.PlaneGeometry(maxDist * 3, maxDist * 3);
       const groundMat = new THREE.MeshStandardMaterial({
         color: 0x060c18,
@@ -629,34 +712,49 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       // North True Bearing Compass Indicator
       const northArrow = new THREE.ArrowHelper(
         new THREE.Vector3(0, 0, -1),
-        new THREE.Vector3(-G.fato * 0.9, 0.1, -G.fato * 0.9),
-        10,
+        new THREE.Vector3(-G.tot * 0.7, 0.1, -G.tot * 0.7),
+        12,
         0xef4444,
-        2.5,
-        1.5
+        3.0,
+        1.8
       );
       scene.add(northArrow);
 
-      // ─── TLOF & FATO REALISTIC HELIPAD PAD ───
+      // ─── TLOF, FATO & SAFETY AREA HELIPAD COMPLEX ───
+      // 1. Safety Area Ground Base (Full Extent G.tot)
+      const saBaseGeo = new THREE.BoxGeometry(G.tot, 0.12, G.tot);
+      const saBaseMat = new THREE.MeshStandardMaterial({
+        color: 0x111c30,
+        roughness: 0.85,
+        metalness: 0.1,
+      });
+      const saBase = new THREE.Mesh(saBaseGeo, saBaseMat);
+      saBase.position.y = 0.06;
+      saBase.receiveShadow = true;
+      scene.add(saBase);
+
+      // Safety Area outer boundary perimeter line
+      const saEdges = new THREE.EdgesGeometry(saBaseGeo);
+      const saLine = new THREE.LineSegments(
+        saEdges,
+        new THREE.LineBasicMaterial({ color: 0xf59e0b, linewidth: 2 })
+      );
+      saLine.position.y = 0.06;
+      scene.add(saLine);
+
+      // 2. FATO Pad (G.fato) elevated slightly with custom markings
       const padTexture = createPadTexture(G.fato, G.tlof, G.D, heli.mtow, proj.facility === "vertiport");
-      const fatoGeo = new THREE.BoxGeometry(G.fato, 0.4, G.fato);
+      const fatoGeo = new THREE.BoxGeometry(G.fato, 0.3, G.fato);
       const fatoMat = new THREE.MeshStandardMaterial({
         map: padTexture,
         roughness: 0.65,
         metalness: 0.2,
       });
       const fatoPad = new THREE.Mesh(fatoGeo, fatoMat);
-      fatoPad.position.y = 0.2;
+      fatoPad.position.y = 0.22;
       fatoPad.receiveShadow = true;
       fatoPad.castShadow = true;
       scene.add(fatoPad);
-
-      // Safety Area boundary line & glow
-      const saGeo = new THREE.BoxGeometry(G.tot, 0.08, G.tot);
-      const saEdges = new THREE.EdgesGeometry(saGeo);
-      const saLine = new THREE.LineSegments(saEdges, new THREE.LineBasicMaterial({ color: 0xf59e0b, linewidth: 2 }));
-      saLine.position.y = 0.04;
-      scene.add(saLine);
 
       // TLOF Perimeter Green Inset Lights
       const tlofHalf = G.tlof / 2;
@@ -666,35 +764,33 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
 
       for (let i = -tlofHalf + 1; i <= tlofHalf; i += Math.max(3, G.tlof / 5)) {
         [-tlofHalf, tlofHalf].forEach((side) => {
-          // X-parallel edges
           const l1 = new THREE.Mesh(tlofLightGeo, tlofLightMat);
-          l1.position.set(i, 0.42, side);
+          l1.position.set(i, 0.38, side);
           scene.add(l1);
-          // Z-parallel edges
           const l2 = new THREE.Mesh(tlofLightGeo, tlofLightMat);
-          l2.position.set(side, 0.42, i);
+          l2.position.set(side, 0.38, i);
           scene.add(l2);
         });
       }
 
       // Helipad Floodlight / Glow
-      const padSpot = new THREE.SpotLight(0x67e8f9, 2.5, G.fato * 2.5, Math.PI / 3, 0.4, 1.2);
+      const padSpot = new THREE.SpotLight(0x67e8f9, nightMode ? 4.5 : 2.5, G.fato * 3, Math.PI / 3, 0.4, 1.2);
       padSpot.position.set(0, G.fato * 0.9, 0);
       padSpot.target = fatoPad;
       scene.add(padSpot);
 
-      // Windsock
+      // Windsock (Placed outside the Safety Area)
       const windsock = createWindsock(4.5, zone.wind?.pd || 0);
-      windsock.position.set(G.tot * 0.65, 0, G.tot * 0.65);
+      windsock.position.set(G.tot * 0.68, 0, G.tot * 0.68);
       scene.add(windsock);
 
-      // ─── 3D AIRCRAFT MODEL (Bell 412 / S-92 / Joby eVTOL) ───
+      // ─── 3D AIRCRAFT MODEL ───
       const { group: aircraft, rotorGroup, tailRotorGroup, beacon } = createAircraftModel(
         G.D,
         heli,
         proj.facility === "vertiport"
       );
-      aircraft.position.set(0, 0.4, 0);
+      aircraft.position.set(0, 0.38, 0);
       aircraft.rotation.y = -((approachHeading * Math.PI) / 180);
       scene.add(aircraft);
 
@@ -703,20 +799,26 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       tailRotorRef.current = tailRotorGroup;
       beaconLightsRef.current = [beacon];
 
-      // ─── ICAO OLS SURFACES ───
-      // Approach & Take-Off climb fan
-      const { group: appSurfaces, appLen } = buildApproachSurfaces(G, maxDist);
+      // ─── ICAO OLS SURFACES (APPROACH & TRANSITIONAL) ───
+      // Approach Fan starts at the outer boundary of the Safety Area
+      const { group: appSurfaces, appLen, totalH, saHalf } = buildApproachSurfaces(G, maxDist);
       appSurfaces.rotation.y = -((approachHeading * Math.PI) / 180);
       scene.add(appSurfaces);
       approachGroupRef.current = appSurfaces;
 
-      // Transitional surfaces (1:2 / 50%)
-      const transSurfaces = buildTransitionalSurfaces(G, appLen, maxDist);
+      // Transitional surfaces (1:2) along the safety area sides
+      const transSurfaces = buildTransitionalSurfaces(G, appLen, maxDist, saHalf);
       transSurfaces.rotation.y = -((approachHeading * Math.PI) / 180);
       scene.add(transSurfaces);
       transitionalGroupRef.current = transSurfaces;
 
-      // Inner Horizontal Surface (IHS 45m / 150ft standard level disk)
+      // 3D Approach Flight Path
+      const flightPath = buildFlightPath(saHalf, appLen, totalH);
+      flightPath.rotation.y = -((approachHeading * Math.PI) / 180);
+      scene.add(flightPath);
+      flightPathGroupRef.current = flightPath;
+
+      // Inner Horizontal Surface (IHS 45m standard level disk)
       const ihHeight = G.ih || 45;
       const ihRadius = Math.min(G.ihR || 3000, maxDist * 1.05);
       const ihGeo = new THREE.CylinderGeometry(ihRadius, ihRadius, 0.2, 64);
@@ -734,21 +836,17 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       scene.add(ihMesh);
       ihMeshRef.current = ihMesh;
 
-      // ─── OBSTACLES & PENETRATION GEOMETRY ───
+      // ─── ACCURATE ICAO OBSTACLE PENETRATION EVALUATION ───
       const obstacleMeshes = [];
-      const radHeading = (approachHeading * Math.PI) / 180;
+      const trackRad = (approachHeading * Math.PI) / 180;
+      const splay = G.splay || 0.1;
+      const innerLenM = G.innerLenM || 60;
+      const innerG = G.innerG || 1 / 2;
+      const outerG = G.outerG || G.appG || 1 / 22.22;
+      const transG = G.transG || 0.5;
 
       obs.forEach((o, obsIdx) => {
         if (o.d <= 0 && (!o.corners || !o.corners.length)) return;
-
-        // OLS allowable heights calculation at obstacle distance & angle
-        const allowAppH = o.d > 0 ? o.d * G.appG : 999;
-        const allowTransH = o.d > 0 ? o.d * G.transG : 999;
-        const penetrates = o.d > 0 ? o.h > allowAppH : false;
-        const penetratesTrans = o.d > 0 ? o.h > allowTransH : false;
-
-        const isViolation = penetrates || penetratesTrans;
-        const statusColor = penetrates ? 0xef4444 : penetratesTrans ? 0xf59e0b : 0x10b981;
 
         let ox = 0, oz = 0;
         const isFence = String(o.tp || "").toLowerCase().includes("fence");
@@ -769,16 +867,61 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
         const bl = o.l || bw;
         const bh = Math.max(o.h || 10, 1.5);
 
+        // Transform (ox, oz) into corridor-aligned coordinates along approach track
+        // along: distance along approach axis (positive = towards approach path)
+        // lateral: absolute distance perpendicular to approach axis
+        const along = -(ox * Math.sin(trackRad) + oz * Math.cos(trackRad));
+        const lateral = Math.abs(ox * Math.cos(trackRad) - oz * Math.sin(trackRad));
+
+        // Exact OLS allowable calculation based on ICAO surfaces
+        let allowH = 45; // default to Inner Horizontal
+        let surfaceName = "Inner Horizontal (45m)";
+        let insideApproach = false;
+
+        if (Math.abs(along) >= saHalf) {
+          // Obstacle is in the approach / departure sector beyond safety area
+          const s = Math.abs(along) - saHalf;
+          const halfWidthAtS = saHalf + s * splay;
+
+          if (lateral <= halfWidthAtS) {
+            // Inside the Approach Fan!
+            insideApproach = true;
+            surfaceName = `Approach Fan 1:${(1 / (s <= innerLenM ? innerG : outerG)).toFixed(0)}`;
+            const inclineH = s <= innerLenM ? s * innerG : innerLenM * innerG + (s - innerLenM) * outerG;
+            allowH = 0.22 + inclineH;
+          } else {
+            // In the transitional slope flanking the approach fan
+            surfaceName = "Transitional Slope (1:2)";
+            const fanH = s <= innerLenM ? s * innerG : innerLenM * innerG + (s - innerLenM) * outerG;
+            allowH = 0.22 + fanH + (lateral - halfWidthAtS) * transG;
+          }
+        } else {
+          // Obstacle is abreast of the Safety Area (-saHalf to +saHalf)
+          if (lateral <= saHalf) {
+            // Inside Safety Area: strictly 0m obstacle height allowed
+            surfaceName = "Safety Area (Ground)";
+            allowH = 0.22;
+          } else {
+            // Transitional surface sloping up from safety area side
+            surfaceName = "Transitional Slope (1:2)";
+            allowH = 0.22 + (lateral - saHalf) * transG;
+          }
+        }
+
+        // Cap maximum allowable by Inner Horizontal surface height
+        allowH = Math.min(allowH, G.ih || 45);
+
+        const penetrates = bh > allowH;
+        const statusColor = penetrates ? 0xef4444 : 0x10b981;
+
         // Building / Structure Footprint
         let mesh;
         if (isFence && o.corners && o.corners.length >= 2) {
-          // Continuous fence geometry
           const pts = o.corners.map((c) => new THREE.Vector3(c.x - cent.x, 0.2 + bh / 2, c.y - cent.y));
           const fGeo = new THREE.BufferGeometry().setFromPoints(pts);
           mesh = new THREE.Line(fGeo, new THREE.LineBasicMaterial({ color: 0x38bdf8, linewidth: 3 }));
           scene.add(mesh);
         } else if (o.corners && o.corners.length >= 3) {
-          // Custom extruded polygon building
           const cx = o.corners.reduce((s, c) => s + c.x, 0) / o.corners.length;
           const cy = o.corners.reduce((s, c) => s + c.y, 0) / o.corners.length;
           const shape = new THREE.Shape(
@@ -790,9 +933,9 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
           const mat = new THREE.MeshStandardMaterial({
             color: statusColor,
             transparent: true,
-            opacity: isViolation ? 0.85 : 0.65,
+            opacity: penetrates ? 0.85 : 0.65,
             emissive: statusColor,
-            emissiveIntensity: isViolation ? 0.35 : 0.08,
+            emissiveIntensity: penetrates ? 0.35 : 0.08,
             roughness: 0.35,
             metalness: 0.4,
           });
@@ -808,21 +951,17 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
           edgeLine.position.copy(mesh.position);
           scene.add(edgeLine);
         } else {
-          // Standard box or tower obstacle
           const isTower = String(o.tp || "").toLowerCase().includes("mast") || String(o.tp || "").toLowerCase().includes("crane");
-          let geo;
-          if (isTower) {
-            geo = new THREE.CylinderGeometry(0.8, bw / 2, bh, 8);
-          } else {
-            geo = new THREE.BoxGeometry(bw, bh, bl);
-          }
+          const geo = isTower
+            ? new THREE.CylinderGeometry(0.8, bw / 2, bh, 8)
+            : new THREE.BoxGeometry(bw, bh, bl);
 
           const mat = new THREE.MeshStandardMaterial({
             color: statusColor,
             transparent: true,
-            opacity: isViolation ? 0.88 : 0.65,
+            opacity: penetrates ? 0.88 : 0.65,
             emissive: statusColor,
-            emissiveIntensity: isViolation ? 0.35 : 0.08,
+            emissiveIntensity: penetrates ? 0.35 : 0.08,
             roughness: 0.35,
             metalness: 0.35,
           });
@@ -839,21 +978,21 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
           scene.add(edgeLine);
         }
 
-        // Attach obstacle metadata for raycasting interaction
         if (mesh) {
           mesh.userData = {
             obstacle: o,
             index: obsIdx,
             ox, oz, bh,
-            allowAppH,
+            allowH,
+            surfaceName,
             penetrates,
-            isViolation,
-            clearance: penetrates ? -(o.h - allowAppH) : (allowAppH - o.h),
+            insideApproach,
+            clearance: penetrates ? -(bh - allowH) : (allowH - bh),
           };
           obstacleMeshes.push(mesh);
         }
 
-        // Height line indicator with top hazard beacon
+        // Height line indicator
         const hPoints = [new THREE.Vector3(ox, 0, oz), new THREE.Vector3(ox, bh, oz)];
         const hLine = new THREE.Line(
           new THREE.BufferGeometry().setFromPoints(hPoints),
@@ -862,7 +1001,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
         scene.add(hLine);
 
         // Flashing Aviation Warning Beacon on top of tall or penetrating structures
-        if (isViolation || bh > 20) {
+        if (penetrates || bh > 20) {
           const topLight = new THREE.PointLight(0xef4444, 1.8, 25);
           topLight.position.set(ox, bh + 0.5, oz);
           scene.add(topLight);
@@ -870,7 +1009,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
         }
 
         // Penetration Plane Marker: Highlight slice that penetrates OLS
-        if (penetrates && allowAppH < bh) {
+        if (penetrates && allowH < bh) {
           const penDiscGeo = new THREE.RingGeometry(bw * 0.35, bw * 0.75, 20);
           const penDiscMat = new THREE.MeshBasicMaterial({
             color: 0xef4444,
@@ -880,11 +1019,10 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
           });
           const penDisc = new THREE.Mesh(penDiscGeo, penDiscMat);
           penDisc.rotation.x = -Math.PI / 2;
-          penDisc.position.set(ox, allowAppH, oz);
+          penDisc.position.set(ox, allowH, oz);
           scene.add(penDisc);
 
-          // Red vertical breach vector
-          const breachPts = [new THREE.Vector3(ox, allowAppH, oz), new THREE.Vector3(ox, bh, oz)];
+          const breachPts = [new THREE.Vector3(ox, allowH, oz), new THREE.Vector3(ox, bh, oz)];
           const breachLine = new THREE.Line(
             new THREE.BufferGeometry().setFromPoints(breachPts),
             new THREE.LineBasicMaterial({ color: 0xef4444, linewidth: 3 })
@@ -914,12 +1052,10 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
         const dt = (currentTime - lastTime) / 1000;
         lastTime = currentTime;
 
-        // Auto-orbit camera
         if (animState.autoRotate) {
           dr.rotY += 0.004;
         }
 
-        // Animated rotor rotation
         if (showRotorAnim && rotorRef.current) {
           rotorRef.current.rotation.y += 0.35;
           if (tailRotorRef.current) {
@@ -927,14 +1063,12 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
           }
         }
 
-        // Beacon strobe pulsation
         animState.beaconTime += dt;
         const strobe = Math.sin(animState.beaconTime * 6) > 0.3 ? 1.8 : 0.2;
         beaconLightsRef.current.forEach((b) => {
           if (b) b.intensity = strobe;
         });
 
-        // Camera position calculation with Pan & Zoom
         const d = dr.baseCamDist * dr.zoom;
         camera.position.x = dr.panX + d * Math.sin(dr.rotY) * Math.cos(dr.rotX);
         camera.position.y = dr.panY + d * Math.sin(dr.rotX);
@@ -966,7 +1100,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
         mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
         mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
-        // Raycasting hover detection for obstacles
         if (!dr.active && !dr.rightActive && obstacleMeshesRef.current.length > 0) {
           raycaster.setFromCamera(mouse, camera);
           const intersects = raycaster.intersectObjects(obstacleMeshesRef.current, false);
@@ -991,7 +1124,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
           dr.rotY += dx * 0.005;
           dr.rotX = clamp(dr.rotX + dy * 0.005, 0.04, Math.PI / 2 - 0.02);
         } else if (dr.rightActive) {
-          // Pan camera
           const panSpeed = (dr.baseCamDist * dr.zoom) / 1200;
           dr.panX -= (dx * Math.cos(dr.rotY) + dy * Math.sin(dr.rotY) * Math.sin(dr.rotX)) * panSpeed;
           dr.panZ -= (-dx * Math.sin(dr.rotY) + dy * Math.cos(dr.rotY) * Math.sin(dr.rotX)) * panSpeed;
@@ -1016,7 +1148,6 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       el.addEventListener("wheel", onWheel, { passive: false });
       el.addEventListener("contextmenu", onContextMenu);
 
-      // Handle Container Resize
       const resizeObserver = new ResizeObserver((entries) => {
         for (const entry of entries) {
           const newW = entry.contentRect.width;
@@ -1052,9 +1183,9 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
         if (animId) cancelAnimationFrame(animId);
       };
     }
-  }, [zone, proj, size, G, cent, heli]);
+  }, [zone, proj, size, G, cent, heli, nightMode]);
 
-  // Synchronize Layer Visibilities & Heading dynamically without rebuilding full scene
+  // Synchronize Layer Visibilities & Heading dynamically
   useEffect(() => {
     if (approachGroupRef.current) {
       approachGroupRef.current.visible = showApproach;
@@ -1063,6 +1194,10 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     if (transitionalGroupRef.current) {
       transitionalGroupRef.current.visible = showTransitional;
       transitionalGroupRef.current.rotation.y = -((approachHeading * Math.PI) / 180);
+    }
+    if (flightPathGroupRef.current) {
+      flightPathGroupRef.current.visible = showFlightPath;
+      flightPathGroupRef.current.rotation.y = -((approachHeading * Math.PI) / 180);
     }
     if (aircraftGroupRef.current) {
       aircraftGroupRef.current.visible = showAircraft;
@@ -1075,7 +1210,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
       ringsGroupRef.current.visible = showRings;
     }
     animStateRef.current.autoRotate = autoRotate;
-  }, [showApproach, showTransitional, showInnerHoriz, showAircraft, showRings, autoRotate, approachHeading]);
+  }, [showApproach, showTransitional, showFlightPath, showInnerHoriz, showAircraft, showRings, autoRotate, approachHeading]);
 
   // Snapshot generation for reports
   useEffect(() => {
@@ -1103,7 +1238,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
     boxShadow: "0 20px 50px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08)",
     overflow: "hidden",
     width: "100%",
-    maxWidth: 720,
+    maxWidth: 760,
     margin: "0 auto",
   };
 
@@ -1155,7 +1290,13 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
   }
 
   const obsCount = (zone.obs || []).length;
-  const violationCount = (zone.obs || []).filter((o) => o.h > (o.d > 0 ? o.d * G.appG : 999)).length;
+  const violationCount = (zone.obs || []).filter((o) => {
+    const d = o.d || 0;
+    const saHalf = G.tot / 2;
+    const s = Math.max(0, d - saHalf);
+    const allow = 0.22 + s * G.appG;
+    return (o.h || 0) > allow;
+  }).length;
 
   return (
     <div style={shell} ref={containerRef}>
@@ -1188,17 +1329,21 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
             >
               {violationCount > 0 ? `${violationCount} PENETRATIONS` : "OLS CLEAR"}
             </span>
+            <span style={{ fontSize: 9, color: K.mu }}>
+              Starts @ Safety Area Edge ({(G.tot / 2).toFixed(1)}m from center)
+            </span>
           </div>
           <div style={{ fontSize: 16, fontWeight: 800, color: K.tx, marginTop: 4, letterSpacing: -0.4 }}>
             Zone {zone.lb} · {heli.nm} (D={G.D.toFixed(1)}m)
           </div>
           <div style={{ fontSize: 9, color: K.mu, marginTop: 2 }}>
-            Approach 1:{(1 / G.appG).toFixed(1)} · Transitional 1:2 · Splay {(G.splay * 100).toFixed(0)}%
+            FATO {G.fato.toFixed(0)}m · Safety Area {G.tot.toFixed(0)}m · Approach 1:{(1 / G.appG).toFixed(1)} · Transitional 1:2
           </div>
         </div>
 
         {/* Action buttons */}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {pillBtn(nightMode, () => setNightMode(!nightMode), nightMode ? "Night Mode" : "Day Mode", nightMode ? "🌙" : "☀️")}
           <button
             type="button"
             onClick={() => {
@@ -1293,7 +1438,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
             gap: 6,
             padding: "8px 10px",
             borderRadius: 8,
-            background: "rgba(5,11,22,0.82)",
+            background: "rgba(5,11,22,0.85)",
             border: "1px solid " + K.bd,
             backdropFilter: "blur(12px)",
             boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
@@ -1302,6 +1447,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
           <div style={{ fontSize: 8, fontWeight: 800, color: K.mu, letterSpacing: 1.2 }}>OLS LAYERS</div>
           {pillBtn(showApproach, () => setShowApproach(!showApproach), `Approach (1:${(1 / G.appG).toFixed(0)})`, "📐")}
           {pillBtn(showTransitional, () => setShowTransitional(!showTransitional), "Transitional (1:2)", "🔷")}
+          {pillBtn(showFlightPath, () => setShowFlightPath(!showFlightPath), "Flight Descent Path", "🛬")}
           {pillBtn(showInnerHoriz, () => setShowInnerHoriz(!showInnerHoriz), `Inner Horiz (+${G.ih}m)`, "🟣")}
           {pillBtn(showAircraft, () => setShowAircraft(!showAircraft), heli.nm.split(" ")[0], "🚁")}
           {pillBtn(showRings, () => setShowRings(!showRings), "Distance Rings", "🎯")}
@@ -1316,15 +1462,15 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
             right: 14,
             padding: "10px 12px",
             borderRadius: 8,
-            background: "rgba(5,11,22,0.85)",
+            background: "rgba(5,11,22,0.88)",
             border: "1px solid " + K.bd,
             backdropFilter: "blur(12px)",
-            minWidth: 150,
+            minWidth: 160,
             boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
           }}
         >
           <div style={{ fontSize: 8, fontWeight: 800, color: K.cy, letterSpacing: 1.2, marginBottom: 8 }}>
-            LEGEND & LIMITS
+            SURFACE GEOMETRY
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 9, color: K.dm }}>
@@ -1333,19 +1479,23 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 9, color: K.dm }}>
               <div style={{ width: 14, height: 4, background: "#f59e0b", borderRadius: 1 }} />
-              <span>Approach Fan</span>
+              <span>Safety Area ({G.tot.toFixed(0)}m)</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 9, color: K.dm }}>
-              <div style={{ width: 14, height: 4, background: "#06b6d4", borderRadius: 1 }} />
-              <span>Transitional Slope</span>
+              <div style={{ width: 14, height: 4, background: "#10b981", border: "1px dashed #ffffff", borderRadius: 1 }} />
+              <span>Threshold Line (Start)</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 9, color: K.dm }}>
-              <div style={{ width: 7, height: 7, borderRadius: 2, background: "#10b981" }} />
-              <span>Clear Structure</span>
+              <div style={{ width: 14, height: 4, background: "#f59e0b", opacity: 0.5, borderRadius: 1 }} />
+              <span>Approach Fan (1:{(1 / G.appG).toFixed(0)})</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 9, color: K.dm }}>
+              <div style={{ width: 14, height: 4, background: "#06b6d4", opacity: 0.5, borderRadius: 1 }} />
+              <span>Transitional Slope (1:2)</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 9, color: K.dm }}>
               <div style={{ width: 7, height: 7, borderRadius: 2, background: "#ef4444" }} />
-              <span>Penetration Breach</span>
+              <span>Breach Penetration</span>
             </div>
           </div>
         </div>
@@ -1359,41 +1509,44 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
               right: 14,
               padding: "10px 14px",
               borderRadius: 8,
-              background: "rgba(8,16,32,0.92)",
-              border: hoveredObs.isViolation ? "1px solid #ef4444" : "1px solid #10b981",
+              background: "rgba(8,16,32,0.95)",
+              border: hoveredObs.penetrates ? "1px solid #ef4444" : "1px solid #10b981",
               backdropFilter: "blur(12px)",
-              boxShadow: hoveredObs.isViolation
+              boxShadow: hoveredObs.penetrates
                 ? "0 0 20px rgba(239,68,68,0.4)"
                 : "0 0 20px rgba(16,185,129,0.3)",
-              maxWidth: 240,
+              maxWidth: 260,
               zIndex: 10,
             }}
           >
-            <div style={{ fontSize: 8, fontWeight: 800, color: hoveredObs.isViolation ? "#f87171" : "#34d399" }}>
-              {hoveredObs.isViolation ? "⚠ OLS LIMIT BREACH" : "✓ OLS COMPLIANT"}
+            <div style={{ fontSize: 8, fontWeight: 800, color: hoveredObs.penetrates ? "#f87171" : "#34d399" }}>
+              {hoveredObs.penetrates ? "⚠ OLS LIMIT BREACH" : "✓ OLS COMPLIANT"}
             </div>
             <div style={{ fontSize: 13, fontWeight: 800, color: K.tx, marginTop: 2 }}>
               {hoveredObs.obstacle.nm || `Obstacle #${hoveredObs.index + 1}`}
+            </div>
+            <div style={{ fontSize: 10, color: K.cy, marginTop: 2, fontWeight: 600 }}>
+              Surface: {hoveredObs.surfaceName}
             </div>
             <div style={{ fontSize: 10, color: K.dm, marginTop: 4 }}>
               Height: <strong style={{ color: K.tx }}>{hoveredObs.obstacle.h}m</strong> · Distance:{" "}
               <strong style={{ color: K.tx }}>{hoveredObs.obstacle.d}m</strong>
             </div>
             <div style={{ fontSize: 10, color: K.dm, marginTop: 2 }}>
-              OLS Allowable: <strong style={{ color: K.tx }}>{hoveredObs.allowAppH.toFixed(1)}m</strong>
+              OLS Allowable: <strong style={{ color: K.tx }}>{hoveredObs.allowH.toFixed(1)}m</strong>
             </div>
             <div
               style={{
                 fontSize: 10,
                 fontWeight: 700,
-                color: hoveredObs.isViolation ? "#f87171" : "#34d399",
+                color: hoveredObs.penetrates ? "#f87171" : "#34d399",
                 marginTop: 4,
                 borderTop: "1px solid rgba(255,255,255,0.1)",
                 paddingTop: 4,
               }}
             >
-              {hoveredObs.isViolation
-                ? `Penetrates by +${(-hoveredObs.clearance).toFixed(1)}m`
+              {hoveredObs.penetrates
+                ? `Breach: +${(-hoveredObs.clearance).toFixed(1)}m above surface`
                 : `Clearance margin: ${hoveredObs.clearance.toFixed(1)}m`}
             </div>
           </div>
@@ -1407,7 +1560,7 @@ export const Obs3D = forwardRef(function Obs3D({ zone, proj, size = 520, onSnaps
             left: 14,
             padding: "4px 10px",
             borderRadius: 6,
-            background: "rgba(5,11,22,0.78)",
+            background: "rgba(5,11,22,0.85)",
             border: "1px solid " + K.bd,
             backdropFilter: "blur(8px)",
             fontSize: 9,
