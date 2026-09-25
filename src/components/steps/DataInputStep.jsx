@@ -16,6 +16,7 @@ import { parseWindRoseCsv, parseMetarWindPaste, parseWindRoseTable, applyImportT
 import { parseObstacleXlsxArrayBuffer, parsePnezdText, parseDroneClassificationCsv, parseOlsCsv } from "../../engine/obstacleSurveyImport.js";
 import { parseElevationCsv, computeTerrainAnalysis } from "../../engine/terrainMesh.js";
 import { StartHereCard } from "../ui/StartHereCard.jsx";
+import { AccessDiagramCanvas } from "../charts/AccessDiagramCanvas.jsx";
 
 export function DataInputStep() {
   const {
@@ -679,6 +680,9 @@ export function DataInputStep() {
 
         {/* ACCESS TAB */}
         {dataTab === "access" && <>
+        {/* INTERACTIVE ACCESS & DISTANCE CANVAS */}
+        <AccessDiagramCanvas z={z} dp={dp} zf={zf} K={K} D={D} />
+
         {/* ACCESS */}
         <div className="hvs-card" style={{ padding: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
