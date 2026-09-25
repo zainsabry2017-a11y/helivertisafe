@@ -1,8 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useReducer, useRef } from "react";
 import { K } from "../utils/theme.js";
-import { useAuth } from "../hooks/useAuth";
-import { LoginPage } from "./auth/LoginPage";
-import { SignupPage } from "./auth/SignupPage";
 import { STEPS_DEF } from "../data/constants.js";
 import {
   getD, getHeli, getXwLim, calcGeom, WORKFLOW_STATES,
@@ -38,9 +35,6 @@ import {
 
 
 export default function App() {
-  const { user, loading, signOut, signIn, signUp, signInWithGoogle } = useAuth();
-  const [authView, setAuthView] = useState("login"); // "login" | "signup"
-
   const [mode, setMode] = useState("welcome"); // "welcome" | "app"
   const emptyState = { step: 0, proj: mkProj(), site: mkSite(), zones: [], sel: null, recs: [], scored: false, tab: "overview", scenarios: [] };
   const [historyState, dp] = useReducer(undoReducer, { past: [], present: emptyState, future: [] });
@@ -233,50 +227,6 @@ export default function App() {
   const StepViews = [ProjectSetupStep, SiteDefinitionStep, ZoneManagerStep, DataInputStep, ScoreEngineStep, ResultsStep];
   const StepComponent = StepViews[step];
 
-  if (loading) {
-    return (
-      <div
-        style={{
-          minHeight: "100vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "linear-gradient(180deg, #030810 0%, #050a12 30%, #0a1628 100%)",
-          color: "#e1e7ef",
-          fontFamily: "var(--font-sans), system-ui, sans-serif",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div
-            aria-hidden="true"
-            style={{
-              width: 22,
-              height: 22,
-              borderRadius: 999,
-              border: "2px solid rgba(6,182,212,0.35)",
-              borderTopColor: "#06b6d4",
-              animation: "hvs-spin 0.9s linear infinite",
-            }}
-          />
-          <div style={{ fontWeight: 700, color: "#cbd5e1" }}>Loading…</div>
-        </div>
-        <style>{`@keyframes hvs-spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return authView === "signup" ? (
-      <SignupPage onSignup={signUp} onGoToLogin={() => setAuthView("login")} />
-    ) : (
-      <LoginPage
-        onSignIn={signIn}
-        onSignInWithGoogle={signInWithGoogle}
-        onGoToSignup={() => setAuthView("signup")}
-      />
-    );
-  }
-
   if (mode === "welcome") {
     return <WelcomeScreen dp={dp} setMode={setMode} hasAutoSave={hasAutoSave} />;
   }
@@ -310,20 +260,7 @@ export default function App() {
           <Tag color={K.cy}>D={D}m</Tag>
           <Tag color={K.pu}>XW≤{getXwLim(proj)}kt</Tag>
           {(() => { const wf = WORKFLOW_STATES.find(s => s.v === (proj.workflow || "draft")) || WORKFLOW_STATES[0]; return <Tag color={wf.c}>{wf.l}</Tag>; })()}
-          <Tag color={K.cy}>{user.email || "Signed in"}</Tag>
-          {btn(
-            "Logout",
-            async () => {
-              try {
-                await signOut();
-              } finally {
-                setMode("welcome");
-              }
-            },
-            "ghost",
-            false,
-            { ariaLabel: "Sign out" }
-          )}
+          {btn("Home", () => setMode("welcome"), "ghost", false, { ariaLabel: "Back to welcome screen" })}
           {btn(
             <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
               <IconExportProject size={17} title="" />
